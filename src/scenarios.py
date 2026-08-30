@@ -2,7 +2,11 @@
 `fire_model_spec.md`) oraz uruchomienie ich wszystkich przez `simulation.run_simulation`.
 
 Macierz: 2 archetypy (Informatyk B2B, Rodzina 2+2) x 2 warianty (z/bez
-wehikułów podatkowych) = A1, A2, B1, B2.
+wehikułów podatkowych) = A1, A2, B1, B2. Każdy z nich uruchamiany jest
+dodatkowo w 3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60) --
+to jest właśnie "elastyczna alokacja aktywów" z hipotezy badawczej pracy
+(portfel akcyjny to ACWI, obligacyjny to wyłącznie polskie detaliczne EDO,
+bez globalnych obligacji -- na wyraźną decyzję użytkownika).
 """
 
 from __future__ import annotations
@@ -52,18 +56,22 @@ SCENARIOS: dict[str, tuple[Archetype, bool]] = {
     "B2": (ARCHETYPE_B, False),
 }
 
+# Warianty alokacji akcje/obligacje testowane dla każdego scenariusza --
+# "elastyczna alokacja aktywów" z hipotezy badawczej (podrozdz. 4.2 spec).
+ALLOCATIONS: dict[str, float] = {"80_20": 0.80, "60_40": 0.60, "40_60": 0.40}
+
 
 def run_all_scenarios(
     market_data: pd.DataFrame | None = None,
-    assumptions: SimulationAssumptions | None = None,
     output_dir: Path = RESULTS_DIR,
 ) -> pd.DataFrame:
-    """Uruchamia wszystkie 4 scenariusze na tych samych danych rynkowych,
-    zapisuje pełną miesięczną ścieżkę każdego do
-    `results/scenario_{kod}_monthly.csv` oraz zbiorcze podsumowanie do
-    `results/summary.csv`. Zwraca DataFrame podsumowania (jeden wiersz na
-    scenariusz) -- zestaw metryk z sekcji 7 spec ("Co dalej"): czy i kiedy
-    osiągnięto FIRE, wartość końcowa portfela, skumulowany tax drag.
+    """Uruchamia wszystkie 4 scenariusze x 3 warianty alokacji (12 przebiegów
+    łącznie) na tych samych danych rynkowych, zapisuje pełną miesięczną
+    ścieżkę każdego do `results/scenario_{kod}_equity{waga}_monthly.csv`
+    oraz zbiorcze podsumowanie do `results/summary.csv`. Zwraca DataFrame
+    podsumowania (jeden wiersz na kombinację scenariusz x alokacja) --
+    zestaw metryk z sekcji 7 spec ("Co dalej"): czy i kiedy osiągnięto FIRE,
+    wartość końcowa portfela, skumulowany tax drag.
     """
     if market_data is None:
         market_data = build_processed_dataset()
@@ -71,12 +79,15 @@ def run_all_scenarios(
     output_dir.mkdir(parents=True, exist_ok=True)
     summaries = []
     for code, (archetype, use_tax_vehicles) in SCENARIOS.items():
-        ledger, summary = run_simulation(archetype, market_data, use_tax_vehicles, assumptions)
-        ledger.to_csv(output_dir / f"scenario_{code}_monthly.csv")
-        summary["scenario"] = code
-        summaries.append(summary)
+        for allocation_code, equity_weight in ALLOCATIONS.items():
+            assumptions = SimulationAssumptions(equity_weight=equity_weight, bond_weight=1 - equity_weight)
+            ledger, summary = run_simulation(archetype, market_data, use_tax_vehicles, assumptions)
+            ledger.to_csv(output_dir / f"scenario_{code}_equity{allocation_code}_monthly.csv")
+            summary["scenario"] = code
+            summary["allocation"] = allocation_code
+            summaries.append(summary)
 
-    summary_df = pd.DataFrame(summaries).set_index("scenario")
+    summary_df = pd.DataFrame(summaries).set_index(["scenario", "allocation"])
     summary_df.to_csv(output_dir / "summary.csv")
     return summary_df
 

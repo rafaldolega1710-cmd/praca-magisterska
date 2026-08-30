@@ -14,11 +14,11 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 
 ### Dane historyczne
 
-**Noga akcyjna portfela to jeden globalny ETF (iShares MSCI ACWI, ticker `ACWI`), nie osobno S&P 500 i WIG**, a **polska noga obligacji to detaliczne obligacje EDO (10-letnie, indeksowane inflacją), nie TBSP.Index** — dwie świadome decyzje, uproszczenia względem oryginalnej metodologii z sekcji 2/3.2 pracy, które warto odzwierciedlić przy pisaniu rozdziału IV. Noga globalnych obligacji (Damodaran, UST10Y) pozostaje bez zmian.
+**Noga akcyjna portfela to jeden globalny ETF (iShares MSCI ACWI, ticker `ACWI`), nie osobno S&P 500 i WIG**, a **noga obligacyjna to wyłącznie polskie detaliczne obligacje EDO (10-letnie, indeksowane inflacją)** — bez TBSP.Index i bez globalnych obligacji (Damodaran/UST10Y). Trzy świadome decyzje, odejście od oryginalnej metodologii z sekcji 2/3.2 pracy, które warto odzwierciedlić przy pisaniu rozdziału IV. `fetch_damodaran_returns` zostaje w kodzie i jest przetestowana, ale nie jest już częścią głównego pipeline'u.
 
 | Źródło | Zmienna | Sposób pobrania |
 |---|---|---|
-| Aswath Damodaran (NYU Stern) | 10-letnie obligacje skarbowe USA (globalna noga obligacji) | Automatyczny (`fetch_damodaran_returns`) |
+| Aswath Damodaran (NYU Stern) | 10-letnie obligacje skarbowe USA — **niewykorzystywane w głównym pipeline** (patrz sekcja "Symulacja i scenariusze") | Automatyczny (`fetch_damodaran_returns`), dostępne opcjonalnie |
 | NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **wyłącznie od 2002 r.**, wcześniejszych danych publiczne API NBP nie udostępnia |
 | GUS BDL API | CPI (inflacja), przeciętne miesięczne wynagrodzenie brutto | Automatyczny (`fetch_gus_cpi`, `fetch_gus_avg_wage`) |
 | iShares MSCI ACWI ETF (Yahoo Finance) | Globalny ETF akcyjny — zastępuje S&P 500 + WIG | **Zrzut z sesji przeglądarki** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
@@ -64,26 +64,36 @@ pytest
 
 ### Symulacja i scenariusze
 
-`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) na realnych danych historycznych (`build_processed_dataset()`, okno kwiecień 2008 – lipiec 2026) i zapisuje wyniki do `results/scenario_{A1,A2,B1,B2}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
+`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) w **3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60)** — 12 przebiegów łącznie — na realnych danych historycznych (`build_processed_dataset()`, okno kwiecień 2008 – lipiec 2026) i zapisuje wyniki do `results/scenario_{kod}_equity{wariant}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
+
+**Portfel ma dwie nogi: akcje (globalny ETF ACWI) i obligacje (wyłącznie polskie detaliczne EDO)** — bez globalnych obligacji (Damodaran/UST10Y) i bez TBSP.Index, na wyraźną decyzję użytkownika. Testowanie kilku proporcji akcje/obligacje to bezpośrednia realizacja "elastycznej alokacji aktywów" z hipotezy badawczej pracy (patrz Wstęp).
 
 **Metodologia horyzontu:** symulacja biegnie jedną, nieprzetworzoną historyczną sekwencją zwrotów od pierwszego do ostatniego dostępnego miesiąca — bez cyklicznego powielania danych i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE (25-krotność rocznych wydatków, aktualizowana co miesiąc wraz ze wzrostem wynagrodzeń) nie zostanie osiągnięty w tym ~18-letnim oknie, wynik jawnie to raportuje (`fire_reached=False`) zamiast ekstrapolować nieistniejące dane.
 
 **Realny wynik (uruchomienie 2026-08):**
 
-| Scenariusz | Cel FIRE osiągnięty? | Lata do FIRE | Wartość portfela na koniec okna |
-|---|---|---|---|
-| A1 (Informatyk, z programami) | Tak | 18,1 | 8,72 mln zł |
-| A2 (Informatyk, bez programów) | Nie (98,9% celu) | — | 8,37 mln zł |
-| B1 (Rodzina 2+2, z programami) | Nie | — | 2,65 mln zł |
-| B2 (Rodzina 2+2, bez programów) | Nie | — | 2,29 mln zł |
+| Scenariusz | Alokacja | Cel FIRE osiągnięty? | Lata do FIRE | Wartość portfela na koniec okna |
+|---|---|---|---|---|
+| A1 (Informatyk, z programami) | 80/20 | **Tak** | 18,0 | 9,03 mln zł |
+| A1 | 60/40 | Nie | — | 8,14 mln zł |
+| A1 | 40/60 | Nie | — | 7,31 mln zł |
+| A2 (Informatyk, bez programów) | 80/20 | **Tak** | 18,2 | 8,66 mln zł |
+| A2 | 60/40 | Nie | — | 7,82 mln zł |
+| A2 | 40/60 | Nie | — | 7,08 mln zł |
+| B1 (Rodzina 2+2, z programami) | 80/20 | Nie | — | 2,74 mln zł |
+| B2 (Rodzina 2+2, bez programów) | 80/20 | Nie | — | 2,37 mln zł |
 
-Różnica A1 vs A2 (osiągnięty cel vs 98,9% celu w tym samym oknie czasowym) i B1 vs B2 (2,65 mln vs 2,29 mln) to bezpośrednia, policzalna ilustracja wartości korzyści podatkowej III filaru — dokładnie ta różnica, o którą pyta hipoteza badawcza pracy.
+(B1/B2 przy 60/40 i 40/60 analogicznie niżej — pełne dane w `results/summary.csv`.)
+
+Dwie ilustracje bezpośrednio odpowiadające na pytania hipotezy badawczej:
+- **Wartość tarczy podatkowej (A1 vs A2, ta sama alokacja 80/20):** oba scenariusze osiągają cel w tym samym ~18-letnim oknie, ale A1 (z IKE/IKZE/PPK/OKI) robi to **szybciej** (18,0 vs 18,2 roku) i kończy z **wyższym** portfelem (9,03 mln vs 8,66 mln zł) — różnica to policzalna wartość korzyści podatkowej III filaru.
+- **Wpływ alokacji (80/20 vs 60/40 vs 40/60, ten sam scenariusz):** wyższy udział akcji wyraźnie przyspiesza dojście do celu (tylko wariant 80/20 domyka się w dostępnym oknie danych) kosztem większej zmienności portfela, której ta tabela nie pokazuje wprost — miesięczne ścieżki w `results/*_monthly.csv` pozwalają to zobaczyć.
 
 **Założenia modelu (`SimulationAssumptions`, `src/simulation.py`) — jawnie udokumentowane uproszczenia:**
 
 | Założenie | Wartość | Uzasadnienie |
 |---|---|---|
-| Alokacja portfela | 80% ACWI / 10% UST10Y / 10% EDO | Zgodna z wysoką ekspozycją na akcje rekomendowaną w klasycznych badaniach (podrozdz. 1.3) |
+| Alokacja portfela | 80/20, 60/40 lub 40/60 (akcje ACWI / obligacje EDO) | Testowane równolegle jako realizacja "elastycznej alokacji aktywów" z hipotezy pracy |
 | TER ACWI | 0,20% rocznie | Realny TER UCITS Acc iShares MSCI ACWI (zweryfikowany) |
 | Stopa dywidendy ACWI | 1,5% rocznie | W widełkach realnego trailing yield (1,4–1,6%) |
 | Koszt transakcyjny | 0,29% od nowych zakupów | Typowa prowizja maklerska za zagraniczne ETF-y |
@@ -91,6 +101,7 @@ Różnica A1 vs A2 (osiągnięty cel vs 98,9% celu w tym samym oknie czasowym) i
 | PPK: podstawa składek | Dochód netto zamiast brutto | Pełne odtworzenie ZUS/PIT wykracza poza zakres tego etapu — nieznacznie zaniża realne składki i limity |
 | Rodzina 2+2 | `household_multiplier=2` (podwójne limity IKE/IKZE/PPK) zamiast dwóch osobno symulowanych osób | Znaczne uproszczenie złożoności bez utraty rzędu wielkości wyniku |
 | ROS/ROD (obligacje rodzinne) | Nie zamodelowane w tym etapie | Wymagałoby analogicznego do EDO badania realnych marż tych instrumentów |
+| Globalne obligacje (UST10Y) | Nie zamodelowane — noga obligacyjna to wyłącznie EDO | Na wyraźną decyzję użytkownika; `fetch_damodaran_returns` zostaje w kodzie, przetestowana, na wypadek przyszłego porównania |
 
 **Rebalancing — istotne odejście od podrozdz. 3.3 pracy:** tekst pracy opisuje rebalancing jako operację na całym portfelu gospodarstwa domowego, z preferencją korekty przez konta IKE/IKZE przed sięgnięciem po rachunek standardowy. Zaimplementowana wersja rebalansuje **każde konto niezależnie** — prostsze obliczeniowo, wciąż w pełni oddaje kluczowy mechanizm podatkowy (rebalancing na IKE/IKZE/OKI/PPK jest bezpodatkowy, na rachunku standardowym generuje realny podatek Belki, widoczny w wynikach jako `cumulative_rebalancing_tax`), ale nie optymalizuje *które* konto sprzedaje, tak jak zrobiłby to racjonalny inwestor.
 
@@ -107,3 +118,4 @@ Model, zgodnie z podrozdziałem 3.4 pracy, ma charakter ilustracyjnego studium p
 - **Roczne dane (Damodaran, GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
 - **Noga akcyjna to jeden globalny ETF (ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika), kosztem krótszej historii (2008+ zamiast 1928+ dla USA) w zamian za jeden, spójny, faktycznie inwestowalny instrument zamiast dwóch teoretycznych indeksów.
 - **Polska noga obligacji to EDO, nie TBSP.Index** — kolejne odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Dla 40 z 156 miesięcy istnienia EDO (wrzesień 2013 – grudzień 2016) oraz dla bieżącego, jeszcze niezakończonego roku kalendarzowego rzeczywista marża/CPI nie są znane, więc stosowana jest formuła zastępcza `stopa referencyjna NBP + 2 p.p.` zamiast faktycznej konstrukcji EDO — patrz sekcja "Dane historyczne" wyżej.
+- **Portfel nie zawiera globalnych obligacji** — dwie nogi (akcje ACWI, obligacje EDO), nie trzy z pierwotnego briefu (akcje globalne + obligacje globalne + obligacje polskie). Uproszczenie na wyraźną decyzję użytkownika; obniża dywersyfikację geograficzną części dłużnej portfela.

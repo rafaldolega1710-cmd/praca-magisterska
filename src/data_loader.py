@@ -3,8 +3,12 @@ makroekonomicznych dla modelu FIRE-PL (podrozdz. 3.2 pracy / sekcja 2
 `fire_model_spec.md`).
 
 Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
-- Damodaran `histretSP.xls` (10-letnie obligacje skarbowe USA -- noga
-  globalnych obligacji) -- pobierany automatycznie.
+- Damodaran `histretSP.xls` (10-letnie obligacje skarbowe USA) -- pobierany
+  automatycznie, ale **nie jest już częścią `build_processed_dataset`**:
+  na wyraźną decyzję użytkownika model nie ma globalnej nogi obligacyjnej,
+  portfel to wyłącznie akcje (ACWI) i polskie obligacje detaliczne (EDO).
+  Funkcje `fetch_damodaran_returns`/`_parse_damodaran_xls` zostają dostępne
+  i przetestowane na wypadek przyszłego porównania.
 - NBP API kursów średnich USD/PLN -- pobierany automatycznie, ale wyłącznie
   od 2002-01-02 (twardy limit publicznego REST API, nie błąd zapytania).
 - GUS BDL API (CPI, przeciętne wynagrodzenie) -- pobierany automatycznie,
@@ -485,10 +489,10 @@ def build_processed_dataset(
     do `data/processed/market_data.csv`.
 
     Noga akcyjna to globalny ETF (`load_acwi_history`, ACWI), nie
-    S&P 500 + WIG osobno. Noga obligacji to Damodaran (globalne, UST10Y) +
-    EDO/NBP-referencyjna (polskie, `build_edo_reference_rate_monthly`), nie
-    TBSP.Index. Obie zmiany na wyraźną decyzję użytkownika -- patrz
-    docstring modułu.
+    S&P 500 + WIG osobno. Noga obligacji to wyłącznie polskie detaliczne
+    EDO (`build_edo_reference_rate_monthly`) -- bez globalnych obligacji
+    (Damodaran/UST10Y) i bez TBSP.Index. Obie zmiany na wyraźną decyzję
+    użytkownika -- patrz docstring modułu.
 
     Użyty jest outer join po indeksie miesięcznym: żadna seria nie jest po
     cichu ucinana do najkrótszej wspólnej historii. Decyzję, czy dany
@@ -497,24 +501,17 @@ def build_processed_dataset(
     ze wszystkich granic dolnych -- patrz docstring modułu), podejmuje
     `simulation.py`, nie ten moduł.
     """
-    damodaran_annual = fetch_damodaran_returns()
     cpi_annual = fetch_gus_cpi()
     wage_annual = fetch_gus_avg_wage()
     usdpln_monthly = fetch_nbp_usdpln_monthly()
     acwi_monthly = load_acwi_history(acwi_path)
     edo_monthly = build_edo_reference_rate_monthly()
 
-    ust10y_monthly = _broadcast_annual_to_monthly(
-        damodaran_annual.assign(
-            ust10y_annual_return=damodaran_annual["ust10y_annual_return"].apply(annualize_to_monthly)
-        ),
-        "ust10y_annual_return",
-    ).rename("ust10y_monthly_return")
     cpi_monthly = _broadcast_annual_to_monthly(cpi_annual, "cpi_prev_year_100")
     wage_monthly = _broadcast_annual_to_monthly(wage_annual, "avg_gross_wage_pln")
 
     combined = pd.concat(
-        [acwi_monthly["acwi_monthly_return"], ust10y_monthly, usdpln_monthly["usd_pln"],
+        [acwi_monthly["acwi_monthly_return"], usdpln_monthly["usd_pln"],
          edo_monthly["edo_reference_monthly_return"], cpi_monthly, wage_monthly],
         axis=1,
         join="outer",

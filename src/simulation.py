@@ -9,6 +9,13 @@ i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE nie zostanie
 osiągnięty w tym oknie, wynik jawnie to raportuje (`fire_reached=False`)
 zamiast ekstrapolować nieistniejące dane, zgodnie z podrozdz. 3.1 pracy
 ("symulacja historyczna, nie Monte Carlo").
+
+Portfel ma dwie nogi: globalny ETF akcyjny (ACWI) i polskie detaliczne
+obligacje EDO -- na wyraźną decyzję użytkownika, w modelu nie ma już
+globalnych obligacji (Damodaran/UST10Y). Proporcja akcje/obligacje jest
+parametryzowana (`SimulationAssumptions.equity_weight`) -- `scenarios.py`
+uruchamia każdy scenariusz w kilku wariantach alokacji (80/20, 60/40, 40/60),
+żeby zbadać "elastyczną alokację aktywów" z hipotezy badawczej pracy.
 """
 
 from __future__ import annotations
@@ -33,7 +40,7 @@ from src.tax_engine import (
 )
 
 ACCOUNT_NAMES = ["ppk", "ikze", "ike", "oki", "standard"]
-ASSET_NAMES = ["equity", "global_bond", "domestic_bond"]
+ASSET_NAMES = ["equity", "bond"]
 TAX_FREE_ACCOUNTS = ["ppk", "ikze", "ike", "oki"]  # rebalancing bez zdarzenia podatkowego
 OKI_INDEXATION_START_YEAR = 2030
 
@@ -41,11 +48,15 @@ OKI_INDEXATION_START_YEAR = 2030
 @dataclass
 class SimulationAssumptions:
     """Założenia rynkowo-kosztowe modelu, jawnie udokumentowane i uzasadnione
-    (patrz README, sekcja "Symulacja i scenariusze") -- nie ukryte domysły."""
+    (patrz README, sekcja "Symulacja i scenariusze") -- nie ukryte domysły.
+
+    `equity_weight` + `bond_weight` powinny sumować się do 1.0 -- to
+    `scenarios.py` odpowiada za wygenerowanie kilku wariantów tej pary
+    (80/20, 60/40, 40/60), nie ten moduł.
+    """
 
     equity_weight: float = 0.80
-    global_bond_weight: float = 0.10
-    domestic_bond_weight: float = 0.10
+    bond_weight: float = 0.20
     acwi_ter_annual: float = 0.0020
     dividend_yield_annual: float = 0.015
     transaction_cost_rate: float = 0.0029
@@ -84,15 +95,13 @@ def _add_contribution(account: dict[str, float], amount: float, assumptions: Sim
     wyłącznie z różnicy w tempie wzrostu poszczególnych klas aktywów
     w czasie, nie z samych wpłat."""
     account["equity"] += amount * assumptions.equity_weight
-    account["global_bond"] += amount * assumptions.global_bond_weight
-    account["domestic_bond"] += amount * assumptions.domestic_bond_weight
+    account["bond"] += amount * assumptions.bond_weight
 
 
 def _grow_account(
     account: dict[str, float],
     equity_gross_return: float,
-    global_bond_return: float,
-    domestic_bond_return: float,
+    bond_return: float,
     assumptions: SimulationAssumptions,
     is_standard: bool,
 ) -> float:
@@ -110,8 +119,7 @@ def _grow_account(
         dividend_tax_amount = 0.0
         account["equity"] *= 1 + (equity_gross_return - ter_monthly)
 
-    account["global_bond"] *= 1 + global_bond_return
-    account["domestic_bond"] *= 1 + domestic_bond_return
+    account["bond"] *= 1 + bond_return
     return dividend_tax_amount
 
 
@@ -123,8 +131,7 @@ def _rebalance_tax_free_account(account: dict[str, float], assumptions: Simulati
     if total <= 0:
         return
     account["equity"] = total * assumptions.equity_weight
-    account["global_bond"] = total * assumptions.global_bond_weight
-    account["domestic_bond"] = total * assumptions.domestic_bond_weight
+    account["bond"] = total * assumptions.bond_weight
 
 
 def _rebalance_standard_account(
@@ -134,9 +141,9 @@ def _rebalance_standard_account(
     loss_registry: LossCarryforward,
     current_year: int,
 ) -> tuple[float, float]:
-    """Rachunek standardowy: sprzedaż przeważonych klas aktywów generuje
+    """Rachunek standardowy: sprzedaż przeważonej klasy aktywów generuje
     podatek Belki od części stanowiącej zysk (`capital_gains_tax_on_rebalancing`,
-    z uwzględnieniem kompensacji strat), zakup niedoważonych -- nie.
+    z uwzględnieniem kompensacji strat), zakup niedoważonej -- nie.
     Zwraca (zapłacony podatek, zaktualizowana podstawa kosztowa).
     """
     total = _account_total(account)
@@ -145,8 +152,7 @@ def _rebalance_standard_account(
 
     targets = {
         "equity": total * assumptions.equity_weight,
-        "global_bond": total * assumptions.global_bond_weight,
-        "domestic_bond": total * assumptions.domestic_bond_weight,
+        "bond": total * assumptions.bond_weight,
     }
     # ulamek biezacej wartosci stanowiacy niezrealizowany zysk wzgledem podstawy
     # kosztowej -- moze byc ujemny (portfel ponizej kosztu, sprzedaz realizuje strate)
@@ -203,14 +209,12 @@ def run_simulation(
 
     data = market_data.dropna(subset=["acwi_monthly_return"]).copy()
     data = data.sort_index()
-    # CPI, przecietne wynagrodzenie i roczny zwrot z obligacji USA (Damodaran)
-    # sa publikowane raz w roku -- dla miesiecy nowszych niz ostatni opublikowany
-    # rok (np. biezacy rok kalendarzowy, zanim GUS/Damodaran zamkna go danymi)
+    # CPI i przecietne wynagrodzenie sa publikowane raz w roku -- dla miesiecy
+    # nowszych niz ostatni opublikowany rok (np. biezacy rok kalendarzowy)
     # przenosimy ostatnia znana wartosc naprzod, zamiast zostawiac NaN (ktore
     # inaczej "zatrulyby" mnożenie salda przez (1+NaN) do konca symulacji).
     data["cpi_prev_year_100"] = data["cpi_prev_year_100"].ffill()
     data["avg_gross_wage_pln"] = data["avg_gross_wage_pln"].ffill()
-    data["ust10y_monthly_return"] = data["ust10y_monthly_return"].ffill()
     data["usd_pln_change"] = data["usd_pln"].pct_change().fillna(0.0)
 
     base_wage = data["avg_gross_wage_pln"].iloc[0]
@@ -296,16 +300,14 @@ def run_simulation(
             standard_cost_basis += surplus
 
         equity_gross = (1 + row["acwi_monthly_return"]) * (1 + row["usd_pln_change"]) - 1
-        global_bond_return = (1 + row["ust10y_monthly_return"]) * (1 + row["usd_pln_change"]) - 1
-        domestic_bond_return = row["edo_reference_monthly_return"]
+        bond_return = row["edo_reference_monthly_return"]  # EDO jest juz w PLN, bez przeliczenia FX
 
         dividend_tax_total = 0.0
         for account_name, account in portfolio.items():
             dividend_tax_total += _grow_account(
                 account,
                 equity_gross,
-                global_bond_return,
-                domestic_bond_return,
+                bond_return,
                 assumptions,
                 is_standard=(account_name == "standard"),
             )
@@ -352,6 +354,7 @@ def run_simulation(
     summary = {
         "archetype": archetype.name,
         "use_tax_vehicles": use_tax_vehicles,
+        "equity_weight": assumptions.equity_weight,
         "fire_reached": fire_month is not None,
         "fire_month": str(fire_month) if fire_month is not None else None,
         "years_to_fire": (
