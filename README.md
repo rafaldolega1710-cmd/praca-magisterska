@@ -9,8 +9,8 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 ### Status
 
 - **Silnik podatkowy (`src/tax_engine.py`)** — zaimplementowany i przetestowany. Kaskadowa alokacja nadwyżki budżetowej (PPK → IKZE → IKE → OKI → rachunek standardowy), mechanika PPK, kompensacja strat kapitałowych, harmonogram zwrotu ulgi IKZE.
-- **Pipeline danych historycznych (`src/data_loader.py`)** — zaimplementowany i przetestowany. Automatyczne pobieranie (Damodaran, NBP, GUS) zweryfikowane na żywo; WIG i TBSP.Index wymagają ręcznego pobrania pliku (patrz niżej).
-- **Pętla symulacyjna i scenariusze (`src/simulation.py`, `src/scenarios.py`)** — w toku.
+- **Pipeline danych historycznych (`src/data_loader.py`)** — zaimplementowany i przetestowany. Automatyczne pobieranie (Damodaran, NBP, GUS) zweryfikowane na żywo; WIG i TBSP.Index (oba opcjonalne) wymagają ręcznego pobrania pliku (patrz niżej).
+- **Pętla symulacyjna i scenariusze (`src/simulation.py`, `src/scenarios.py`)** — zaimplementowane i przetestowane. Uruchomione na realnych danych 2008–2026 (`results/summary.csv`).
 
 ### Dane historyczne
 
@@ -48,9 +48,9 @@ data/
 └── processed/    # ujednolicone dane (rok/miesiąc, PLN, realne)
 src/
 ├── tax_engine.py  # kaskada podatkowa: IKE/IKZE/PPK/OKI, tax drag, kompensacja strat
-├── data_loader.py # pobieranie i normalizacja danych: Damodaran, NBP, GUS, WIG, TBSP
-├── simulation.py     (planowane)
-└── scenarios.py       (planowane)
+├── data_loader.py # pobieranie i normalizacja danych: Damodaran, NBP, GUS, ACWI, EDO
+├── simulation.py  # miesieczna petla symulacyjna, SimulationAssumptions
+└── scenarios.py   # archetypy A/B, scenariusze A1/A2/B1/B2, run_all_scenarios()
 tests/            # testy jednostkowe
 results/          # wyniki symulacji (CSV/JSON)
 ```
@@ -61,6 +61,38 @@ results/          # wyniki symulacji (CSV/JSON)
 pip install -r requirements.txt
 pytest
 ```
+
+### Symulacja i scenariusze
+
+`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) na realnych danych historycznych (`build_processed_dataset()`, okno kwiecień 2008 – lipiec 2026) i zapisuje wyniki do `results/scenario_{A1,A2,B1,B2}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
+
+**Metodologia horyzontu:** symulacja biegnie jedną, nieprzetworzoną historyczną sekwencją zwrotów od pierwszego do ostatniego dostępnego miesiąca — bez cyklicznego powielania danych i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE (25-krotność rocznych wydatków, aktualizowana co miesiąc wraz ze wzrostem wynagrodzeń) nie zostanie osiągnięty w tym ~18-letnim oknie, wynik jawnie to raportuje (`fire_reached=False`) zamiast ekstrapolować nieistniejące dane.
+
+**Realny wynik (uruchomienie 2026-08):**
+
+| Scenariusz | Cel FIRE osiągnięty? | Lata do FIRE | Wartość portfela na koniec okna |
+|---|---|---|---|
+| A1 (Informatyk, z programami) | Tak | 18,1 | 8,72 mln zł |
+| A2 (Informatyk, bez programów) | Nie (98,9% celu) | — | 8,37 mln zł |
+| B1 (Rodzina 2+2, z programami) | Nie | — | 2,65 mln zł |
+| B2 (Rodzina 2+2, bez programów) | Nie | — | 2,29 mln zł |
+
+Różnica A1 vs A2 (osiągnięty cel vs 98,9% celu w tym samym oknie czasowym) i B1 vs B2 (2,65 mln vs 2,29 mln) to bezpośrednia, policzalna ilustracja wartości korzyści podatkowej III filaru — dokładnie ta różnica, o którą pyta hipoteza badawcza pracy.
+
+**Założenia modelu (`SimulationAssumptions`, `src/simulation.py`) — jawnie udokumentowane uproszczenia:**
+
+| Założenie | Wartość | Uzasadnienie |
+|---|---|---|
+| Alokacja portfela | 80% ACWI / 10% UST10Y / 10% EDO | Zgodna z wysoką ekspozycją na akcje rekomendowaną w klasycznych badaniach (podrozdz. 1.3) |
+| TER ACWI | 0,20% rocznie | Realny TER UCITS Acc iShares MSCI ACWI (zweryfikowany) |
+| Stopa dywidendy ACWI | 1,5% rocznie | W widełkach realnego trailing yield (1,4–1,6%) |
+| Koszt transakcyjny | 0,29% od nowych zakupów | Typowa prowizja maklerska za zagraniczne ETF-y |
+| Rebalancing | Raz w roku (grudzień), niezależnie w obrębie każdego konta | Uproszczenie względem "zbiorczego" rebalancingu z podrozdz. 3.3 — patrz niżej |
+| PPK: podstawa składek | Dochód netto zamiast brutto | Pełne odtworzenie ZUS/PIT wykracza poza zakres tego etapu — nieznacznie zaniża realne składki i limity |
+| Rodzina 2+2 | `household_multiplier=2` (podwójne limity IKE/IKZE/PPK) zamiast dwóch osobno symulowanych osób | Znaczne uproszczenie złożoności bez utraty rzędu wielkości wyniku |
+| ROS/ROD (obligacje rodzinne) | Nie zamodelowane w tym etapie | Wymagałoby analogicznego do EDO badania realnych marż tych instrumentów |
+
+**Rebalancing — istotne odejście od podrozdz. 3.3 pracy:** tekst pracy opisuje rebalancing jako operację na całym portfelu gospodarstwa domowego, z preferencją korekty przez konta IKE/IKZE przed sięgnięciem po rachunek standardowy. Zaimplementowana wersja rebalansuje **każde konto niezależnie** — prostsze obliczeniowo, wciąż w pełni oddaje kluczowy mechanizm podatkowy (rebalancing na IKE/IKZE/OKI/PPK jest bezpodatkowy, na rachunku standardowym generuje realny podatek Belki, widoczny w wynikach jako `cumulative_rebalancing_tax`), ale nie optymalizuje *które* konto sprzedaje, tak jak zrobiłby to racjonalny inwestor.
 
 ### Ograniczenia modelu
 
