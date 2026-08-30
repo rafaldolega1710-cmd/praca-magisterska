@@ -19,6 +19,7 @@ from src.data_loader import (
     annualize_to_monthly,
     fetch_gus_series,
     fetch_nbp_usdpln_monthly,
+    load_acwi_history,
 )
 
 
@@ -206,3 +207,22 @@ class TestParsePriceSeriesToMonthlyReturns:
         path.write_text("foo,bar\n1,2\n", encoding="utf-8")
         with pytest.raises(ValueError):
             _parse_price_series_to_monthly_returns(path, "x")
+
+
+class TestLoadAcwiHistory:
+    def test_missing_file_raises_with_readme_pointer(self, tmp_path):
+        missing = tmp_path / "acwi_monthly.csv"
+        with pytest.raises(FileNotFoundError, match="README"):
+            load_acwi_history(missing)
+
+    def test_computes_monthly_returns_from_adj_close(self, tmp_path):
+        path = tmp_path / "acwi_monthly.csv"
+        path.write_text(
+            "month,adj_close\n2020-01,100.0\n2020-02,110.0\n2020-03,99.0\n",
+            encoding="utf-8",
+        )
+        result = load_acwi_history(path)
+        assert result.loc[pd.Period("2020-02", freq="M"), "acwi_monthly_return"] == pytest.approx(0.10)
+        assert result.loc[pd.Period("2020-03", freq="M"), "acwi_monthly_return"] == pytest.approx(-0.10)
+        # pierwszy miesiac nie ma poprzedniej wartosci do policzenia zwrotu
+        assert pd.Period("2020-01", freq="M") not in result.index

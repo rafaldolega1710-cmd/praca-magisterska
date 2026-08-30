@@ -14,20 +14,25 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 
 ### Dane historyczne
 
+**Noga akcyjna portfela to jeden globalny ETF (iShares MSCI ACWI, ticker `ACWI`), nie osobno S&P 500 i WIG**, jak pierwotnie zakładał brief (sekcja 2/3.2 pracy) — świadoma decyzja, uproszczenie względem oryginalnej metodologii, którą warto odzwierciedlić przy pisaniu rozdziału IV. Noga obligacji (globalne UST10Y + polski TBSP.Index) pozostaje bez zmian.
+
 | Źródło | Zmienna | Sposób pobrania |
 |---|---|---|
-| Aswath Damodaran (NYU Stern) | S&P 500 (z dywidendami), 10-letnie obligacje skarbowe USA | Automatyczny (`fetch_damodaran_returns`) |
+| Aswath Damodaran (NYU Stern) | 10-letnie obligacje skarbowe USA (globalna noga obligacji) | Automatyczny (`fetch_damodaran_returns`) |
 | NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **wyłącznie od 2002 r.**, wcześniejszych danych publiczne API NBP nie udostępnia |
 | GUS BDL API | CPI (inflacja), przeciętne miesięczne wynagrodzenie brutto | Automatyczny (`fetch_gus_cpi`, `fetch_gus_avg_wage`) |
-| GPW / stooq.pl | Indeks WIG | **Ręczny** — stooq.pl blokuje automatyczne pobieranie zabezpieczeniem antybotowym |
-| GPW Benchmark | TBSP.Index | **Ręczny** — brak stabilnego, darmowego API |
+| iShares MSCI ACWI ETF (Yahoo Finance) | Globalny ETF akcyjny — zastępuje S&P 500 + WIG | **Zrzut z sesji przeglądarki** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
+| GPW Benchmark | TBSP.Index (polskie obligacje) | **Ręczny** — brak stabilnego, darmowego API |
+| GPW / stooq.pl | Indeks WIG | **Ręczny, opcjonalny** — nieużywany w głównym pipeline od czasu przejścia na globalny ETF; `load_wig_manual` pozostaje dostępny na potrzeby ewentualnego porównania z rynkiem polskim w rozdziale IV |
 
-**Ręczne pobranie WIG i TBSP.Index:**
-1. WIG: wejdź na `stooq.pl/q/d/l/?s=wig&i=m` (dane miesięczne) w przeglądarce, pobrany plik zapisz jako `data/raw/wig.csv`.
-2. TBSP.Index: pobierz historyczne notowania z serwisu GPW Benchmark (`gpwbenchmark.pl`) i zapisz jako `data/raw/tbsp.csv`.
+**Skąd wzięły się dane ACWI:** żadne z prawdziwie wypróbowanych źródeł nie dało się zeskryptować z tego środowiska — REST API Yahoo Finance blokuje zapytania („Edge: Too Many Requests” już przy pierwszym), `stooq.com`/`stooq.pl` mają wyzwanie antybotowe, `nasdaq.com` było nieosiągalne, `macrotrends.net` zwrócił 403. Dane w `data/raw/acwi_monthly.csv` pochodzą z rzeczywistej sesji przeglądarki na `finance.yahoo.com/quote/ACWI/history` (zakres „Max”, interwał „Monthly”) — to zrzut stanu na dzień pobrania, nie odtwarzalne jednym poleceniem. Odświeżenie o kolejne miesiące wymaga powtórzenia tych samych kroków ręcznie (lub poproszenia o to ponownie).
+
+**Ręczne pobranie TBSP.Index (i opcjonalnie WIG):**
+1. TBSP.Index: pobierz historyczne notowania z serwisu GPW Benchmark (`gpwbenchmark.pl`) i zapisz jako `data/raw/tbsp.csv`.
+2. WIG (opcjonalnie, do analiz porównawczych): `stooq.pl/q/d/l/?s=wig&i=m` w przeglądarce, zapisz jako `data/raw/wig.csv`.
 3. Oba pliki obsługiwane są zarówno w formacie polskim stooq (`Data;Otwarcie;...;Zamkniecie;Wolumen`), jak i angielskim (`Date,Open,...,Close,Volume`) — `load_wig_manual`/`load_tbsp_manual` same rozpoznają format.
 
-**Ważne ograniczenie zweryfikowane podczas implementacji:** mimo że WIG sięga 1991 r., publiczne API NBP (potrzebne do przeliczenia zagranicznej części portfela na PLN) udostępnia dane dopiero od 2002 r. Pełna symulacja obejmująca wszystkie klasy aktywów jest więc możliwa realnie od 2002 r.; dla lat 1991–2001 dostępny byłby wyłącznie wariant oparty samodzielnie na WIG.
+**Ważne ograniczenie zweryfikowane podczas implementacji:** publiczne API NBP (potrzebne do przeliczenia zagranicznej części portfela na PLN) udostępnia dane dopiero od 2002 r. Fundusz ACWI powstał dopiero w marcu 2008 r. — to on, nie NBP, jest teraz wiążącym ograniczeniem dolnym dla pełnej symulacji wszystkich klas aktywów. Krótsza historia niż dawałby S&P 500 (od 1928 r.) jest świadomym kosztem przejścia na jeden, faktycznie inwestowalny globalny instrument.
 
 ### Struktura repozytorium
 
@@ -60,5 +65,6 @@ Model, zgodnie z podrozdziałem 3.4 pracy, ma charakter ilustracyjnego studium p
 - **Założenie pełnej racjonalności inwestora** — brak paniki sprzedażowej, brak pogoni za wynikiem, konsekwentne stosowanie algorytmu przez cały horyzont symulacji.
 - **Niezmienność polskiego prawa podatkowego** w całym horyzoncie symulacji, mimo że w ostatnich trzech dekadach miały miejsce m.in. reforma 1999, reforma OFE 2014, wprowadzenie PPK w 2019 oraz OKI (uchwalone 2026, w życie od 1.01.2027).
 - **Krótka historia polskich danych rynkowych** (~35 lat dla WIG, ~15–20 lat dla obligacji) w porównaniu do niemal stuletniej historii amerykańskiej — liczba niezależnych, nienakładających się 30-letnich okresów możliwych do wyodrębnienia z danych PL jest rzędu pojedynczych sztuk. Wyniki należy traktować jako ilustrację rzędu wielkości, nie dowód statystyczny.
-- **Praktyczna dolna granica pełnej symulacji to 2002 r.**, nie 1991 r. (start WIG) — wynika to z zakresu publicznego API NBP używanego do przeliczenia zagranicznej części portfela na PLN (patrz sekcja "Dane historyczne" wyżej).
+- **Praktyczna dolna granica pełnej symulacji to marzec 2008 r.** (data powstania funduszu ACWI), nie 2002 r. (zakres NBP) ani 1991 r. (start WIG) — patrz sekcja "Dane historyczne" wyżej.
 - **Roczne dane (Damodaran, GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
+- **Noga akcyjna to jeden globalny ETF (ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika), kosztem krótszej historii (2008+ zamiast 1928+ dla USA) w zamian za jeden, spójny, faktycznie inwestowalny instrument zamiast dwóch teoretycznych indeksów.

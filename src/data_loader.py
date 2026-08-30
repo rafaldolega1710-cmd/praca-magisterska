@@ -3,20 +3,37 @@ makroekonomicznych dla modelu FIRE-PL (podrozdz. 3.2 pracy / sekcja 2
 `fire_model_spec.md`).
 
 Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
-- Damodaran `histretSP.xls` (S&P 500 + T.Bond, USA) -- pobierany automatycznie.
+- Damodaran `histretSP.xls` (10-letnie obligacje skarbowe USA -- noga
+  globalnych obligacji) -- pobierany automatycznie.
 - NBP API kursów średnich USD/PLN -- pobierany automatycznie, ale wyłącznie
   od 2002-01-02 (twardy limit publicznego REST API, nie błąd zapytania).
 - GUS BDL API (CPI, przeciętne wynagrodzenie) -- pobierany automatycznie,
   konkretne ID zmiennych zweryfikowane ręcznie (patrz stałe modułu niżej).
+- Globalny ETF akcyjny (iShares MSCI ACWI, ticker ACWI) -- ZASTĘPUJE
+  pierwotny podział "S&P 500 (Damodaran) + WIG" jedną globalną nogą akcyjną,
+  na wyraźną decyzję użytkownika (odejście od architektury opisanej w
+  sekcji 2/3.2 pracy). Dane historyczne uzyskane przez rzeczywistą sesję
+  przeglądarki na stronie Yahoo Finance -- nie istnieje tu skryptowalne
+  API: `query1/query2.finance.yahoo.com` blokuje zapytania z tego
+  środowiska ("Edge: Too Many Requests" nawet przy pierwszym zapytaniu),
+  `stooq.com` i `stooq.pl` chronione są wyzwaniem antybotowym, `nasdaq.com`
+  było nieosiągalne, a `macrotrends.net` zwrócił 403. Odświeżenie tych
+  danych w przyszłości wymaga powtórzenia tego samego, ręcznego/przez
+  przeglądarkę procesu -- patrz README, sekcja "Dane historyczne".
 - WIG i TBSP.Index -- BRAK automatycznego pobierania: typowe źródło
   (stooq.pl) jest chronione wyzwaniem antybotowym (JS proof-of-work), którego
   celowo nie obchodzę. `load_wig_manual`/`load_tbsp_manual` wczytują plik
-  ręcznie pobrany przez użytkownika -- instrukcja w README.
+  ręcznie pobrany przez użytkownika -- instrukcja w README. WIG nie jest
+  już częścią `build_processed_dataset` (zastąpiony przez ACWI), funkcja
+  pozostaje dostępna, gdyby rozdział IV pracy chciał osobno porównać
+  wynik globalnego ETF-u z polskim rynkiem akcji.
 
 Konsekwencja metodologiczna: pełna symulacja obejmująca WSZYSTKIE klasy
 aktywów (w tym część zagraniczną przeliczaną na PLN) jest możliwa dopiero
-od 2002 r., mimo że WIG sam w sobie sięga 1991 r. -- to NBP API, nie WIG,
-jest tu wiążącym ograniczeniem od dołu.
+od 2002 r. (zakres NBP API), a globalna noga akcyjna (ACWI) dodatkowo
+zawęża to do marca 2008 r. (data powstania funduszu) -- krótsza historia
+niż dawałby S&P 500 (od 1928 r.), ale za to jeden, spójny, faktycznie
+inwestowalny instrument zamiast dwóch osobnych indeksów.
 """
 
 from __future__ import annotations
@@ -288,6 +305,38 @@ def load_tbsp_manual(path: Path = RAW_DIR / "tbsp.csv") -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Globalny ETF akcyjny (iShares MSCI ACWI) -- zastępuje S&P 500 + WIG
+# ---------------------------------------------------------------------------
+
+def load_acwi_history(path: Path = RAW_DIR / "acwi_monthly.csv") -> pd.DataFrame:
+    """Wczytuje miesięczną historię kursu iShares MSCI ACWI ETF (ticker
+    `ACWI`, notowania skorygowane o dywidendy -- kolumna Adj Close z Yahoo
+    Finance) i zwraca miesięczne stopy zwrotu (kolumna `acwi_monthly_return`).
+
+    W przeciwieństwie do pozostałych funkcji `fetch_*`/`load_*_manual`, ten
+    plik NIE pochodzi ani z automatycznego zapytania HTTP, ani z ręcznego
+    pobrania przez użytkownika, tylko z rzeczywistej sesji przeglądarki
+    (finance.yahoo.com/quote/ACWI/history, zakres "Max", interwał
+    "Monthly") -- każde inne wypróbowane źródło (Yahoo REST API, stooq,
+    nasdaq.com, macrotrends.net) było zablokowane lub niedostępne z tego
+    środowiska. Odświeżenie danych o kolejne miesiące wymaga powtórzenia
+    tej samej procedury (patrz README) -- traktuj ten plik jak zrzut
+    (snapshot), nie jak wynik powtarzalnego, automatycznego pobierania.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Brak pliku {path}. Patrz README -- sekcja 'Dane historyczne' -- "
+            f"po sposób uzyskania historii ACWI (dane nie są pobierane "
+            f"automatycznie z tego środowiska)."
+        )
+    df = pd.read_csv(path)
+    df["month"] = pd.PeriodIndex(df["month"], freq="M")
+    df = df.set_index("month").sort_index()
+    returns = df["adj_close"].pct_change().to_frame(name="acwi_monthly_return")
+    return returns.dropna()
+
+
+# ---------------------------------------------------------------------------
 # Normalizacja: połączenie wszystkich źródeł do wspólnego formatu miesięcznego
 # ---------------------------------------------------------------------------
 
@@ -306,33 +355,31 @@ def _broadcast_annual_to_monthly(annual: pd.DataFrame, column: str) -> pd.Series
 
 
 def build_processed_dataset(
-    wig_path: Path = RAW_DIR / "wig.csv",
     tbsp_path: Path = RAW_DIR / "tbsp.csv",
+    acwi_path: Path = RAW_DIR / "acwi_monthly.csv",
     output_path: Path = PROCESSED_DIR / "market_data.csv",
 ) -> pd.DataFrame:
-    """Łączy wszystkie źródła (Damodaran, NBP, GUS -- automatyczne; WIG,
-    TBSP -- ręczne) we wspólny, miesięczny DataFrame i zapisuje go do
-    `data/processed/market_data.csv`.
+    """Łączy wszystkie źródła we wspólny, miesięczny DataFrame i zapisuje go
+    do `data/processed/market_data.csv`.
+
+    Noga akcyjna to globalny ETF (`load_acwi_history`, ACWI), nie
+    S&P 500 + WIG osobno -- na decyzję użytkownika, patrz docstring modułu.
+    Noga obligacji to nadal Damodaran (globalne, UST10Y) + TBSP (polskie).
 
     Użyty jest outer join po indeksie miesięcznym: żadna seria nie jest po
     cichu ucinana do najkrótszej wspólnej historii. Decyzję, czy dany
     scenariusz symulacji wymaga kompletu kolumn (co w praktyce ogranicza
-    start symulacji do 2002 r. -- patrz docstring modułu), podejmuje
+    start symulacji do marca 2008 -- daty powstania ACWI, ściślej niż
+    ograniczenie NBP API z 2002 r. -- patrz docstring modułu), podejmuje
     `simulation.py`, nie ten moduł.
     """
     damodaran_annual = fetch_damodaran_returns()
     cpi_annual = fetch_gus_cpi()
     wage_annual = fetch_gus_avg_wage()
     usdpln_monthly = fetch_nbp_usdpln_monthly()
-    wig_monthly = load_wig_manual(wig_path)
+    acwi_monthly = load_acwi_history(acwi_path)
     tbsp_monthly = load_tbsp_manual(tbsp_path)
 
-    sp500_monthly = _broadcast_annual_to_monthly(
-        damodaran_annual.assign(
-            sp500_annual_return=damodaran_annual["sp500_annual_return"].apply(annualize_to_monthly)
-        ),
-        "sp500_annual_return",
-    ).rename("sp500_monthly_return")
     ust10y_monthly = _broadcast_annual_to_monthly(
         damodaran_annual.assign(
             ust10y_annual_return=damodaran_annual["ust10y_annual_return"].apply(annualize_to_monthly)
@@ -343,7 +390,7 @@ def build_processed_dataset(
     wage_monthly = _broadcast_annual_to_monthly(wage_annual, "avg_gross_wage_pln")
 
     combined = pd.concat(
-        [sp500_monthly, ust10y_monthly, usdpln_monthly["usd_pln"], wig_monthly["wig_monthly_return"],
+        [acwi_monthly["acwi_monthly_return"], ust10y_monthly, usdpln_monthly["usd_pln"],
          tbsp_monthly["tbsp_monthly_return"], cpi_monthly, wage_monthly],
         axis=1,
         join="outer",
