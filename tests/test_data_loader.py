@@ -26,6 +26,8 @@ from src.data_loader import (
     fetch_nbp_usdpln_monthly,
     load_acwi_history,
     load_edo_margins,
+    load_gus_avg_wage_history,
+    load_gus_cpi_history,
 )
 
 
@@ -218,6 +220,33 @@ class TestFetchNbpDailyForYear:
             mock_download.assert_not_called()
 
 
+class TestLoadGusHistory:
+    def test_load_gus_cpi_history_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_gus_cpi_history(tmp_path / "missing.csv")
+
+    def test_load_gus_cpi_history_reads_indexed_by_year(self, tmp_path):
+        path = tmp_path / "cpi.csv"
+        path.write_text("year,cpi_prev_year_100\n2022,114.4\n2023,111.4\n", encoding="utf-8")
+        df = load_gus_cpi_history(path)
+        assert df.loc[2022, "cpi_prev_year_100"] == pytest.approx(114.4)
+
+    def test_load_gus_avg_wage_history_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_gus_avg_wage_history(tmp_path / "missing.csv")
+
+    def test_load_gus_avg_wage_history_reads_indexed_by_year(self, tmp_path):
+        path = tmp_path / "wage.csv"
+        path.write_text(
+            "year,avg_gross_wage_pln\n1994,532.80\n1995,702.62\n", encoding="utf-8"
+        )
+        df = load_gus_avg_wage_history(path)
+        # sanity: brak skoku na granicy denominacji 1995 r. (wartosci juz przeliczone
+        # w pliku zrodlowym, ta funkcja tylko wczytuje -- test pilnuje formatu, nie przeliczenia)
+        assert df.loc[1994, "avg_gross_wage_pln"] == pytest.approx(532.80)
+        assert df.loc[1995, "avg_gross_wage_pln"] == pytest.approx(702.62)
+
+
 class TestFetchGusSeries:
     def test_parses_gus_bdl_response(self, tmp_path):
         cache_path = tmp_path / "gus_test.csv"
@@ -378,7 +407,7 @@ class TestBuildEdoReferenceRateMonthly:
         nbp_path.write_text("effective_from,reference_rate_pct\n1998-01-01,10.0\n", encoding="utf-8")
 
         fake_cpi = pd.DataFrame({"cpi_prev_year_100": [103.4]}, index=pd.Index([2020], name="year"))
-        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+        with patch("src.data_loader.load_gus_cpi_history", return_value=fake_cpi):
             result = build_edo_reference_rate_monthly(margins_path, nbp_path)
 
         # inflacja 2020 = 3.4%, marza 1.5% -> stopa roczna 4.9%, przeliczona na miesieczna
@@ -400,7 +429,7 @@ class TestBuildEdoReferenceRateMonthly:
         )
 
         fake_cpi = pd.DataFrame({"cpi_prev_year_100": [100.0]}, index=pd.Index([2015], name="year"))
-        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+        with patch("src.data_loader.load_gus_cpi_history", return_value=fake_cpi):
             result = build_edo_reference_rate_monthly(margins_path, nbp_path)
 
         # stopa ref. NBP 1.5% + fallback marzy 2% = 3.5% rocznie
@@ -421,7 +450,7 @@ class TestBuildEdoReferenceRateMonthly:
         nbp_path.write_text("effective_from,reference_rate_pct\n2025-01-01,4.00\n", encoding="utf-8")
 
         fake_cpi = pd.DataFrame({"cpi_prev_year_100": [103.6]}, index=pd.Index([2025], name="year"))
-        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+        with patch("src.data_loader.load_gus_cpi_history", return_value=fake_cpi):
             result = build_edo_reference_rate_monthly(margins_path, nbp_path)
 
         expected_monthly = annualize_to_monthly(0.04 + 0.02)

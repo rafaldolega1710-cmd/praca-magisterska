@@ -20,7 +20,7 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 |---|---|---|
 | Aswath Damodaran (NYU Stern) | 10-letnie obligacje skarbowe USA — **niewykorzystywane w głównym pipeline** (patrz sekcja "Symulacja i scenariusze") | Automatyczny (`fetch_damodaran_returns`), dostępne opcjonalnie |
 | NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **od 1995 r.**: żywe REST API dla 2002+, roczne pliki archiwalne `static.nbp.pl` dla 1995–2001 |
-| GUS BDL API | CPI (inflacja), przeciętne miesięczne wynagrodzenie brutto | Automatyczny (`fetch_gus_cpi`, `fetch_gus_avg_wage`) |
+| GUS, stat.gov.pl | CPI (inflacja), przeciętne miesięczne wynagrodzenie **w gospodarce narodowej** | **Zrzut, od 1950 r.** (`load_gus_cpi_history`, `load_gus_avg_wage_history`) — patrz niżej; wersje BDL API (2002+) zostają dostępne jako alternatywa |
 | MSCI ACWI Index (curvo.eu) | Globalny indeks akcyjny (~2500 spółek, rynki rozwinięte + rozwijające się) — zastępuje S&P 500 + WIG | **Zrzut** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
 | Ministerstwo Finansów, obligacjeskarbowe.pl | Marże serii obligacji EDO — zastępują TBSP.Index | **Zebrane skryptem** (`data/raw/edo_margins.csv`) ze statycznych stron ofertowych — patrz niżej |
 | NBP, archiwum stóp procentowych | Stopa referencyjna NBP — formuła zastępcza tam, gdzie marża EDO nieznana | Automatyczny/zrzut (`data/raw/nbp_reference_rate.csv`, `fetch_nbp_reference_rate`) |
@@ -40,7 +40,9 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 
 **Skąd wzięły się dane NBP sprzed 2002 r.:** żywe REST API NBP (`api.nbp.pl`) ma dane dopiero od 2002 r., ale NBP publikuje też roczne pliki archiwalne (`static.nbp.pl/dane/kursy/Archiwum/archiwum_tab_a_{rok}.xls`) sięgające technicznie do co najmniej 1985 r. — bez zabezpieczeń antybotowych. Ten moduł obsługuje je od 1995 r.: wcześniejszy układ kolumn (dane tygodniowe, kolumny wg nazw krajów w kolejności alfabetycznej) jest inny i nieobsługiwany. `fetch_nbp_usdpln_monthly` sam dobiera właściwe źródło dla każdego roku.
 
-**Ważne ograniczenie zweryfikowane podczas implementacji:** mimo że kurs NBP sięga teraz 1995 r., a indeks ACWI grudnia 1987 r., **faktycznym wiążącym ograniczeniem dolnym całej symulacji pozostaje 2002 r.** — to dane GUS o przeciętnym wynagrodzeniu (potrzebne do wzrostu dochodu gospodarstwa i limitów IKE/IKZE/OKI) mają najkrótszą historię spośród wszystkich źródeł w pipeline, nie kurs walutowy. Wydłużenie NBP do 1995 r. było więc konieczne i poprawne, ale samo w sobie nie wydłużyło jeszcze okna symulacji — zrobiłoby to dopiero znalezienie dłuższej historii danych GUS (nie zrobione w tym etapie). Efektywne okno symulacji to nadal styczeń 2002 – lipiec 2026 (~24,6 roku).
+**Skąd wzięły się dane GUS od 1950 r. — i dlaczego to też poprawka, nie tylko wydłużenie:** `stat.gov.pl` publikuje w treści dwóch swoich stron gotowe tablice roczne od 1950 r. — "Roczne wskaźniki cen towarów i usług konsumpcyjnych" (z eksportem CSV) i "Przeciętne miesięczne wynagrodzenie w gospodarce narodowej" (tabela w treści strony). Przy weryfikacji długości historii okazało się, że zmienna BDL API użyta pierwotnie dla wynagrodzenia (`fetch_gus_avg_wage`, raportowana na poziomie powiatu) to **inna seria**, niż ta, do której faktycznie odwołuje się ustawa o IKE (art. 13a: limit liczony od wynagrodzenia "w gospodarce narodowej") — dla 2002 r. różnica to 2239,56 zł (BDL) vs 2133,21 zł (gospodarka narodowa, prawidłowa). Wynagrodzenia sprzed denominacji 1995-01-01 są w źródle w starych złotych — przeliczone (/10 000) dla spójności. CPI nie miało tego problemu (wartości identyczne z BDL dla lat pokrywających się), więc to czyste wydłużenie.
+
+**Ważne ograniczenie zweryfikowane podczas implementacji:** po wydłużeniu kursu NBP (do 1995 r.) i danych GUS (do 1950 r.), **jedynym pozostałym ograniczeniem dolnym jest stopa referencyjna NBP — od 6 lutego 1998 r.** — używana w formule zastępczej dla EDO. To jednak nie luka techniczna: stopa referencyjna jako narzędzie polityki pieniężnej **nie istniała** przed powstaniem Rady Polityki Pieniężnej na mocy ustawy o NBP z 1997 r. (zweryfikowano) — twardy, uzasadniony instytucjonalnie limit, nie coś do dalszego wydłużania. Efektywne okno symulacji to teraz **luty 1998 – grudzień 2025 (~27,9 roku)**, w górę z ~24,6 roku.
 
 ### Struktura repozytorium
 
@@ -66,30 +68,30 @@ pytest
 
 ### Symulacja i scenariusze
 
-`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) w **3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60)** — 12 przebiegów łącznie — na realnych danych historycznych (`build_processed_dataset()`, efektywne okno styczeń 2002 – lipiec 2026, ~24,6 roku — patrz sekcja "Dane historyczne") i zapisuje wyniki do `results/scenario_{kod}_equity{wariant}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
+`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) w **3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60)** — 12 przebiegów łącznie — na realnych danych historycznych (`build_processed_dataset()`, efektywne okno luty 1998 – grudzień 2025, ~27,9 roku — patrz sekcja "Dane historyczne") i zapisuje wyniki do `results/scenario_{kod}_equity{wariant}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
 
 **Portfel ma dwie nogi: akcje (indeks MSCI ACWI) i obligacje (wyłącznie polskie detaliczne EDO)** — bez globalnych obligacji (Damodaran/UST10Y) i bez TBSP.Index, na wyraźną decyzję użytkownika. Testowanie kilku proporcji akcje/obligacje to bezpośrednia realizacja "elastycznej alokacji aktywów" z hipotezy badawczej pracy (patrz Wstęp).
 
 **Metodologia horyzontu:** symulacja biegnie jedną, nieprzetworzoną historyczną sekwencją zwrotów od pierwszego do ostatniego dostępnego miesiąca — bez cyklicznego powielania danych i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE (25-krotność rocznych wydatków, aktualizowana co miesiąc wraz ze wzrostem wynagrodzeń) nie zostanie osiągnięty w tym oknie, wynik jawnie to raportuje (`fire_reached=False`) zamiast ekstrapolować nieistniejące dane.
 
-**Realny wynik (uruchomienie 2026-08, efektywne okno styczeń 2002 – lipiec 2026, ~24,6 roku — patrz "Ważne ograniczenie" wyżej):**
+**Realny wynik (uruchomienie 2026-08, efektywne okno luty 1998 – grudzień 2025, ~27,9 roku — patrz "Ważne ograniczenie" wyżej):**
 
 | Scenariusz | Alokacja | Cel FIRE osiągnięty? | Lata do FIRE | Wartość portfela na koniec okna |
 |---|---|---|---|---|
-| A1 (Informatyk, z programami) | 80/20 | **Tak** | 17,7 | 18,1 mln zł |
-| A1 | 60/40 | **Tak** | 18,8 | 16,2 mln zł |
-| A1 | 40/60 | **Tak** | 19,8 | 14,4 mln zł |
-| A2 (Informatyk, bez programów) | 80/20 | **Tak** | 17,8 | 17,3 mln zł |
-| A2 | 60/40 | **Tak** | 18,9 | 15,5 mln zł |
-| A2 | 40/60 | **Tak** | 19,8 | 13,9 mln zł |
-| B1 (Rodzina 2+2, z programami) | 80/20 | Nie | — | 5,50 mln zł |
-| B2 (Rodzina 2+2, bez programów) | 80/20 | Nie | — | 4,75 mln zł |
+| A1 (Informatyk, z programami) | 80/20 | **Tak** | 18,8 | 34,6 mln zł |
+| A1 | 60/40 | **Tak** | 18,8 | 31,5 mln zł |
+| A1 | 40/60 | **Tak** | 20,5 | 28,5 mln zł |
+| A2 (Informatyk, bez programów) | 80/20 | **Tak** | 18,8 | 33,6 mln zł |
+| A2 | 60/40 | **Tak** | 19,7 | 30,5 mln zł |
+| A2 | 40/60 | **Tak** | 21,5 | 27,7 mln zł |
+| B1 (Rodzina 2+2, z programami) | 80/20 | Nie | — | 10,6 mln zł |
+| B2 (Rodzina 2+2, bez programów) | 80/20 | Nie | — | 9,18 mln zł |
 
-(B1/B2 przy 60/40 i 40/60 oraz pełna precyzja liczb — w `results/summary.csv`.)
+(B1/B2 przy 60/40 i 40/60 oraz pełna precyzja liczb — w `results/summary.csv`. Wartości bezwzględne wyraźnie wyższe niż w poprzednim, krótszym oknie — dłuższy horyzont i dodatkowe ~4 lata realnego wzrostu wynagrodzeń w bazie GUS przekładają się na wyższy, dynamicznie rosnący cel FIRE i więcej czasu na akumulację.)
 
 Dwie ilustracje bezpośrednio odpowiadające na pytania hipotezy badawczej:
-- **Wartość tarczy podatkowej (A1 vs A2, ta sama alokacja):** przy każdej z 3 alokacji A1 (z IKE/IKZE/PPK/OKI) osiąga cel **szybciej** niż A2 (np. 80/20: 17,7 vs 17,8 roku) i kończy z **wyższym** portfelem (18,1 vs 17,3 mln zł) — różnica to policzalna wartość korzyści podatkowej III filaru, widoczna teraz przy każdym poziomie ryzyka portfela, nie tylko przy jednej alokacji.
-- **Wpływ alokacji (80/20 vs 60/40 vs 40/60, ten sam scenariusz):** dla archetypu A wyższy udział akcji konsekwentnie przyspiesza dojście do celu (17,7 → 18,8 → 19,8 roku) i podnosi wartość końcową, kosztem większej zmienności portfela, której ta tabela nie pokazuje wprost — miesięczne ścieżki w `results/*_monthly.csv` pozwalają to zobaczyć. Archetyp B (niższa stopa oszczędności) nie domyka się w żadnym wariancie w dostępnym ~24,6-letnim oknie.
+- **Wartość tarczy podatkowej (A1 vs A2, ta sama alokacja):** przy 80/20 oba warianty osiągają cel w tym samym miesiącu (listopad 2016, 18,75 roku), ale A1 kończy z wyraźnie wyższym portfelem (34,6 vs 33,6 mln zł — różnica to niższy skumulowany podatek od dywidend i rebalancingu, widoczny wprost w kolumnach `cumulative_dividend_tax`/`cumulative_rebalancing_tax` w `results/summary.csv`). Przy niższym udziale akcji różnica staje się widoczna też w **czasie**: przy 60/40 A1 domyka się w 18,8 roku, A2 dopiero w 19,7 (10 miesięcy różnicy); przy 40/60 to już 20,5 vs 21,5 roku — pełny rok. Im mniej "pracy" wykonuje sama giełda, tym bardziej liczy się tarcza podatkowa.
+- **Wpływ alokacji (80/20 vs 60/40 vs 40/60, ten sam scenariusz):** dla obu wariantów archetypu A wyższy udział akcji konsekwentnie przyspiesza dojście do celu i podnosi wartość końcową, kosztem większej zmienności portfela, której ta tabela nie pokazuje wprost — miesięczne ścieżki w `results/*_monthly.csv` pozwalają to zobaczyć. Archetyp B (niższa stopa oszczędności) nie domyka się w żadnym wariancie w dostępnym ~27,9-letnim oknie.
 
 **Założenia modelu (`SimulationAssumptions`, `src/simulation.py`) — jawnie udokumentowane uproszczenia:**
 
@@ -116,7 +118,7 @@ Model, zgodnie z podrozdziałem 3.4 pracy, ma charakter ilustracyjnego studium p
 - **Założenie pełnej racjonalności inwestora** — brak paniki sprzedażowej, brak pogoni za wynikiem, konsekwentne stosowanie algorytmu przez cały horyzont symulacji.
 - **Niezmienność polskiego prawa podatkowego** w całym horyzoncie symulacji, mimo że w ostatnich trzech dekadach miały miejsce m.in. reforma 1999, reforma OFE 2014, wprowadzenie PPK w 2019 oraz OKI (uchwalone 2026, w życie od 1.01.2027).
 - **Krótka historia polskich danych rynkowych** (~35 lat dla WIG, ~15–20 lat dla obligacji) w porównaniu do niemal stuletniej historii amerykańskiej — liczba niezależnych, nienakładających się 30-letnich okresów możliwych do wyodrębnienia z danych PL jest rzędu pojedynczych sztuk. Wyniki należy traktować jako ilustrację rzędu wielkości, nie dowód statystyczny.
-- **Praktyczna dolna granica pełnej symulacji to styczeń 2002 r.** (zakres danych GUS o przeciętnym wynagrodzeniu — najkrótsza historia spośród wszystkich źródeł), nie grudzień 1987 r. (start indeksu ACWI) ani 1995 r. (zakres kursu NBP, wydłużony w tym etapie, ale nieprzesuwający już faktycznej granicy) — patrz sekcja "Dane historyczne" wyżej.
+- **Praktyczna dolna granica pełnej symulacji to 6 lutego 1998 r.** (data ustanowienia stopy referencyjnej NBP, używanej w formule zastępczej dla EDO) — nie luka techniczna, tylko fakt instytucjonalny: ten instrument polityki pieniężnej po prostu nie istniał wcześniej. Ani indeks ACWI (1987+), ani kurs NBP (1995+, po wydłużeniu w tym etapie), ani dane GUS (1950+, po wydłużeniu i poprawce w tym etapie) nie są już wiążącym ograniczeniem — patrz sekcja "Dane historyczne" wyżej.
 - **Roczne dane (GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
 - **Noga akcyjna to jeden globalny indeks (MSCI ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Pierwotnie użyto notowań ETF-u (od 2008 r.), zastąpione samym indeksem (od 1987 r.) po tym, jak start tuż przed kryzysem 2008 okazał się nadmiernie obciążać wynik.
 - **Polska noga obligacji to EDO, nie TBSP.Index** — kolejne odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Dla 40 z 156 miesięcy istnienia EDO (wrzesień 2013 – grudzień 2016) oraz dla bieżącego, jeszcze niezakończonego roku kalendarzowego rzeczywista marża/CPI nie są znane, więc stosowana jest formuła zastępcza `stopa referencyjna NBP + 2 p.p.` zamiast faktycznej konstrukcji EDO — patrz sekcja "Dane historyczne" wyżej.

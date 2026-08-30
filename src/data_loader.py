@@ -14,8 +14,19 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   zapytania) i rocznych plików archiwalnych `static.nbp.pl` dla 1995-2001
   (zweryfikowano ręcznie: archiwum sięga dalej, do co najmniej 1985 r., ale
   z innym układem kolumn przed 1995 r., nieobsługiwanym przez ten moduł).
-- GUS BDL API (CPI, przeciętne wynagrodzenie) -- pobierany automatycznie,
-  konkretne ID zmiennych zweryfikowane ręcznie (patrz stałe modułu niżej).
+- GUS: CPI i przeciętne wynagrodzenie. Pierwsza wersja korzystała wyłącznie
+  z BDL API (2002/2003+, `fetch_gus_cpi`/`fetch_gus_avg_wage`, wciąż
+  dostępne), ale przy weryfikacji długości historii okazało się, że
+  1) `stat.gov.pl` publikuje w treści swoich stron gotowe tablice roczne
+  sięgające 1950 r. dla obu zmiennych, i 2) zmienna BDL użyta pierwotnie dla
+  wynagrodzenia to inna seria (raportowana na poziomie powiatu) niż ta,
+  do której faktycznie odwołuje się ustawa o IKE (art. 13a: limit liczony
+  od wynagrodzenia "w gospodarce narodowej") -- różnica realna, nie tylko
+  kosmetyczna (dla 2002 r.: 2239,56 zł w BDL vs 2133,21 zł w gospodarce
+  narodowej). `load_gus_cpi_history`/`load_gus_avg_wage_history` (dane od
+  1950 r., wynagrodzenie sprzed denominacji 1995 r. przeliczone /10 000)
+  zastępują te dwie funkcje w `build_processed_dataset` -- i poprawność,
+  i dłuższa historia, nie tylko jedno z nich.
 - Globalny indeks akcyjny (MSCI ACWI Index, ok. 2500 spółek z rynków
   rozwiniętych i rozwijających się) -- ZASTĘPUJE pierwotny podział
   "S&P 500 (Damodaran) + WIG" jedną globalną nogą akcyjną, na wyraźną
@@ -49,21 +60,26 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   (przed EDO -- do września 2013 -- lub między wrześniem 2013 a grudniem
   2016), stosowana jest zastępcza formuła `stopa_referencyjna_NBP + 2%`,
   zgodnie z instrukcją użytkownika -- stopa referencyjna NBP pochodzi z
-  oficjalnego, w pełni maszynowego archiwum `static.nbp.pl` (1998+, bez
-  zabezpieczeń antybotowych).
+  oficjalnego, w pełni maszynowego archiwum `static.nbp.pl`, bez
+  zabezpieczeń antybotowych. Zaczyna się 6.02.1998 -- to NIE jest luka
+  w danych, tylko fakt instytucjonalny: stopa referencyjna jako
+  narzędzie polityki pieniężnej została ustanowiona dopiero wtedy, gdy
+  na mocy ustawy o NBP z 1997 r. powstała Rada Polityki Pieniężnej
+  (zweryfikowano). Ten instrument po prostu nie istniał wcześniej --
+  to twardy, uzasadniony ekonomicznie/instytucjonalnie dolny limit,
+  nie coś do dalszego wydłużania.
 
-Konsekwencja metodologiczna: kurs USD/PLN (potrzebny do przeliczenia
-indeksu MSCI ACWI) jest dostępny w tym module od 1995 r., a sam indeks
-ACWI jeszcze dłużej (od grudnia 1987 r.; archiwum NBP sięga technicznie
-jeszcze dalej, do co najmniej 1985 r., ale z innym, nieobsługiwanym
-układem kolumn sprzed 1995 r. -- patrz komentarz przy stałych modułu).
-Mimo to **faktycznym, wiążącym ograniczeniem dolnym pełnej symulacji
-pozostaje 2002 r.** -- to dane GUS o przeciętnym wynagrodzeniu (potrzebne
-do wzrostu dochodu gospodarstwa i limitów IKE/IKZE/OKI), a nie kurs walutowy,
-mają najkrótszą historię spośród wszystkich źródeł w tym pipeline. Wydłużenie
-kursu NBP do 1995 r. było więc konieczne, ale samo w sobie nie wydłuża
-jeszcze okna symulacji -- zrobiłoby to dopiero znalezienie dłuższej historii
-danych GUS (nieuwzględnione w tym etapie).
+Konsekwencja metodologiczna: po wydłużeniu kursu NBP (do 1995 r.) i danych
+GUS (do 1950 r.), **jedynym wiążącym ograniczeniem dolnym pełnej symulacji
+pozostaje stopa referencyjna NBP, od 6 lutego 1998 r.** -- używana we
+wzorze zastępczym dla EDO tam, gdzie marża tej obligacji jest nieznana.
+W przeciwieństwie do wcześniejszych ograniczeń (zakres API, brak
+digitalizacji starszych danych), to nie jest luka techniczna: stopa
+referencyjna jako narzędzie polityki pieniężnej po prostu nie istniała
+przed powstaniem Rady Polityki Pieniężnej w 1998 r. -- twardy,
+uzasadniony instytucjonalnie limit, nie coś do dalszego wydłużania.
+Indeks MSCI ACWI (1987+), kurs NBP (1995+) i dane GUS (1950+) same w sobie
+sięgają dalej.
 """
 
 from __future__ import annotations
@@ -343,10 +359,16 @@ def fetch_gus_series(variable_id: int, cache_path: Path, force_refresh: bool = F
 
 
 def fetch_gus_cpi(cache_path: Path = RAW_DIR / "gus_cpi.csv", force_refresh: bool = False) -> pd.DataFrame:
-    """Roczny wskaźnik cen towarów i usług konsumpcyjnych GUS, w konwencji
-    "rok poprzedni = 100" (np. 114.4 oznacza inflację +14,4% w danym roku
-    -- tak jak w 2022 r.). Żeby uzyskać stopę inflacji jako ułamek, odejmij
-    100 i podziel przez 100: `(value - 100) / 100`.
+    """Roczny wskaźnik cen towarów i usług konsumpcyjnych GUS (BDL API,
+    2003+), w konwencji "rok poprzedni = 100" (np. 114.4 oznacza inflację
+    +14,4% w danym roku -- tak jak w 2022 r.). Żeby uzyskać stopę inflacji
+    jako ułamek, odejmij 100 i podziel przez 100: `(value - 100) / 100`.
+
+    Zastąpiona w `build_processed_dataset` przez `load_gus_cpi_history`
+    (dłuższa historia, od 1950 r.) -- ta funkcja zostaje dostępna i
+    przetestowana jako alternatywne, żywe źródło (przydatne, gdyby
+    zależało na najnowszym roku szybciej niż aktualizowana jest ręcznie
+    odświeżana tablica długiej historii).
     """
     df = fetch_gus_series(GUS_CPI_VARIABLE_ID, cache_path, force_refresh)
     return df.rename(columns={"value": "cpi_prev_year_100"})
@@ -355,11 +377,65 @@ def fetch_gus_cpi(cache_path: Path = RAW_DIR / "gus_cpi.csv", force_refresh: boo
 def fetch_gus_avg_wage(
     cache_path: Path = RAW_DIR / "gus_avg_wage.csv", force_refresh: bool = False
 ) -> pd.DataFrame:
-    """Roczne przeciętne miesięczne wynagrodzenie brutto w gospodarce
-    narodowej (zł) -- podstawa przeliczania limitów IKE/IKZE/OKI
-    (`tax_engine.annual_limit`, podrozdz. 3.3)."""
+    """Roczne przeciętne miesięczne wynagrodzenie brutto (BDL API, 2002+).
+
+    UWAGA METODOLOGICZNA: ta zmienna BDL (`Przeciętne miesięczne
+    wynagrodzenia brutto`, raportowana na poziomie powiatu) okazała się przy
+    weryfikacji INNĄ serią niż ta, do której faktycznie odwołuje się ustawa
+    o IKE (art. 13a: limit = wielokrotność "przeciętnego prognozowanego
+    wynagrodzenia miesięcznego **w gospodarce narodowej**" z ustawy
+    budżetowej) -- dla 2002 r. ta funkcja zwraca 2239,56 zł, podczas gdy
+    oficjalna seria "w gospodarce narodowej" (patrz `load_gus_avg_wage_history`)
+    podaje 2133,21 zł. Zastąpiona w `build_processed_dataset` przez
+    `load_gus_avg_wage_history` z tego właśnie powodu -- zostaje dostępna
+    i przetestowana, ale NIE jako źródło do liczenia limitów IKE/IKZE/OKI.
+    """
     df = fetch_gus_series(GUS_AVG_WAGE_VARIABLE_ID, cache_path, force_refresh)
     return df.rename(columns={"value": "avg_gross_wage_pln"})
+
+
+def load_gus_cpi_history(path: Path = RAW_DIR / "gus_cpi_1950.csv") -> pd.DataFrame:
+    """Roczny wskaźnik cen towarów i usług konsumpcyjnych GUS od 1950 r.,
+    w tej samej konwencji co `fetch_gus_cpi` ("rok poprzedni = 100") --
+    wartości dla lat 2002+ pokrywają się dokładnie z BDL API (zweryfikowano
+    ręcznie, np. 2022: 114,4 w obu źródłach), więc to czysto wydłużenie
+    historii, nie zmiana metodologii.
+
+    Źródło: `stat.gov.pl` -- strona "Roczne wskaźniki cen towarów i usług
+    konsumpcyjnych od 1950 r." udostępnia gotowy plik CSV do pobrania
+    (link na stronie, nie ukryte API) -- pobrany i zapisany jako zrzut,
+    analogicznie do `load_acwi_history`.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Brak pliku {path}. Źródło: stat.gov.pl, sekcja Ceny/Wskaźniki cen, "
+            f"'Roczne wskaźniki cen towarów i usług konsumpcyjnych od 1950 r.'"
+        )
+    return pd.read_csv(path, index_col="year")
+
+
+def load_gus_avg_wage_history(path: Path = RAW_DIR / "gus_avg_wage_1950.csv") -> pd.DataFrame:
+    """Roczne przeciętne miesięczne wynagrodzenie **w gospodarce narodowej**
+    (zł) od 1950 r. -- to jest właściwa, ustawowo wskazana podstawa
+    przeliczania limitów IKE/IKZE/OKI (`tax_engine.annual_limit`, podrozdz.
+    3.3; art. 13a ustawy o IKE mówi wprost o wynagrodzeniu "w gospodarce
+    narodowej", nie w "sektorze przedsiębiorstw" -- patrz uwaga w
+    `fetch_gus_avg_wage`).
+
+    Źródło: `stat.gov.pl`, strona "Przeciętne miesięczne wynagrodzenie w
+    gospodarce narodowej w latach 1950-2025" -- tabela w treści strony
+    (bez osobnego eksportu CSV/XLSX dla tej konkretnej tablicy), przepisana
+    ręcznie z widocznej treści strony i zapisana jako zrzut. Wartości sprzed
+    1995 r. są w oryginale w starych złotych (PLZ, sprzed denominacji
+    1995-01-01) -- przeliczone tu na nowe złote (/10 000) dla spójności
+    z resztą modelu.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Brak pliku {path}. Źródło: stat.gov.pl, sekcja Rynek pracy, "
+            f"'Przeciętne miesięczne wynagrodzenie w gospodarce narodowej w latach 1950-2025'."
+        )
+    return pd.read_csv(path, index_col="year")
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +510,7 @@ def build_edo_reference_rate_monthly(
     `stopa_referencyjna_NBP + RETAIL_BOND_FALLBACK_MARGIN` (2 p.p., zgodnie
     z aktualną marżą EDO).
     """
-    cpi_annual = fetch_gus_cpi()
+    cpi_annual = load_gus_cpi_history()
     margins = load_edo_margins(edo_margins_path)
     nbp_rates = fetch_nbp_reference_rate(nbp_reference_path)
 
@@ -604,13 +680,13 @@ def build_processed_dataset(
     Użyty jest outer join po indeksie miesięcznym: żadna seria nie jest po
     cichu ucinana do najkrótszej wspólnej historii. Decyzję, czy dany
     scenariusz symulacji wymaga kompletu kolumn (co w praktyce ogranicza
-    start symulacji do 2002 r. -- zakresu danych GUS o przeciętnym
-    wynagrodzeniu, obecnie najkrótszej z wszystkich granic dolnych, mimo że
-    kurs NBP i indeks ACWI same w sobie sięgają dalej wstecz -- patrz
-    docstring modułu), podejmuje `simulation.py`, nie ten moduł.
+    start symulacji do 6 lutego 1998 r. -- daty ustanowienia stopy
+    referencyjnej NBP, jedynego pozostałego ograniczenia dolnego, i to
+    instytucjonalnego, nie technicznego -- patrz docstring modułu),
+    podejmuje `simulation.py`, nie ten moduł.
     """
-    cpi_annual = fetch_gus_cpi()
-    wage_annual = fetch_gus_avg_wage()
+    cpi_annual = load_gus_cpi_history()
+    wage_annual = load_gus_avg_wage_history()
     usdpln_monthly = fetch_nbp_usdpln_monthly()
     acwi_monthly = load_acwi_history(acwi_path)
     edo_monthly = build_edo_reference_rate_monthly()
