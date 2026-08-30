@@ -85,9 +85,15 @@ pytest
 | A2 | 60/40 | **Tak** | 19,7 | 30,5 mln zł |
 | A2 | 40/60 | **Tak** | 21,5 | 27,7 mln zł |
 | B1 (Rodzina 2+2, z programami) | 80/20 | Nie | — | 10,6 mln zł |
+| B1 | 60/40 | Nie | — | 9,63 mln zł |
+| B1 | 40/60 | Nie | — | 8,67 mln zł |
 | B2 (Rodzina 2+2, bez programów) | 80/20 | Nie | — | 9,18 mln zł |
+| B2 | 60/40 | Nie | — | 8,34 mln zł |
+| B2 | 40/60 | Nie | — | 7,57 mln zł |
 
-(B1/B2 przy 60/40 i 40/60 oraz pełna precyzja liczb — w `results/summary.csv`. Wartości bezwzględne wyraźnie wyższe niż w poprzednim, krótszym oknie — dłuższy horyzont i dodatkowe ~4 lata realnego wzrostu wynagrodzeń w bazie GUS przekładają się na wyższy, dynamicznie rosnący cel FIRE i więcej czasu na akumulację.)
+(Pełna precyzja liczb — w `results/summary.csv`. Wartości bezwzględne wyraźnie wyższe niż w poprzednim, krótszym oknie — dłuższy horyzont i dodatkowe ~4 lata realnego wzrostu wynagrodzeń w bazie GUS przekładają się na wyższy, dynamicznie rosnący cel FIRE i więcej czasu na akumulację.)
+
+**Rodzina 2+2 (B1/B2) nie domyka się w żadnym z 3 wariantów alokacji** w dostępnym ~27,9-letnim oknie — spójne z niższą (20%) stopą oszczędności tego archetypu. Mimo to wzorzec jest identyczny jak u archetypu A: wyższy udział akcji daje wyższy portfel na koniec okna (80/20: 10,6 mln zł vs 40/60: 8,67 mln zł dla B1), a B1 (z ulgami) wyprzedza B2 (bez ulg) przy każdej alokacji (10,6 vs 9,18 mln zł przy 80/20) — ten sam mechanizm tarczy podatkowej, tyle że u wolniej oszczędzającego gospodarstwa widoczny wyłącznie w wartości portfela, bo żaden wariant nie dociera do mety w dostępnym oknie danych.
 
 Dwie ilustracje bezpośrednio odpowiadające na pytania hipotezy badawczej:
 - **Wartość tarczy podatkowej (A1 vs A2, ta sama alokacja):** przy 80/20 oba warianty osiągają cel w tym samym miesiącu (listopad 2016, 18,75 roku), ale A1 kończy z wyraźnie wyższym portfelem (34,6 vs 33,6 mln zł — różnica to niższy skumulowany podatek od dywidend i rebalancingu, widoczny wprost w kolumnach `cumulative_dividend_tax`/`cumulative_rebalancing_tax` w `results/summary.csv`). Przy niższym udziale akcji różnica staje się widoczna też w **czasie**: przy 60/40 A1 domyka się w 18,8 roku, A2 dopiero w 19,7 (10 miesięcy różnicy); przy 40/60 to już 20,5 vs 21,5 roku — pełny rok. Im mniej "pracy" wykonuje sama giełda, tym bardziej liczy się tarcza podatkowa.
