@@ -207,21 +207,32 @@ def run_simulation(
     """
     assumptions = assumptions or SimulationAssumptions()
 
-    # przycinamy do okresu, w ktorym WSZYSTKIE trzy skladniki zwrotu portfela
-    # sa dostepne -- odkad indeks MSCI ACWI siega 1988 r., ale kurs USD/PLN
-    # z NBP dopiero 2002 r. (patrz data_loader.py), samo dropna po ACWI nie
-    # wystarcza: wczesniejsze miesiace mialyby NaN w usd_pln, co przez
-    # mnozenie (1+NaN) zatrulyby caly wynik od pierwszego miesiaca.
-    data = market_data.dropna(
-        subset=["acwi_monthly_return", "usd_pln", "edo_reference_monthly_return"]
-    ).copy()
-    data = data.sort_index()
+    data = market_data.sort_index().copy()
     # CPI i przecietne wynagrodzenie sa publikowane raz w roku -- dla miesiecy
-    # nowszych niz ostatni opublikowany rok (np. biezacy rok kalendarzowy)
-    # przenosimy ostatnia znana wartosc naprzod, zamiast zostawiac NaN (ktore
-    # inaczej "zatrulyby" mnożenie salda przez (1+NaN) do konca symulacji).
+    # nowszych niz ostatni opublikowany rok (np. biezacy rok kalendarzowy,
+    # zanim GUS go zamknie danymi) przenosimy ostatnia znana wartosc naprzod.
+    # To musi sie stac PRZED przycieciem (dropna) ponizej -- w przeciwnym
+    # razie te "nadajace sie do naprawy" koncowe miesiace zostalyby po prostu
+    # odciete zamiast wypelnione, sztucznie skracajac symulacje.
     data["cpi_prev_year_100"] = data["cpi_prev_year_100"].ffill()
     data["avg_gross_wage_pln"] = data["avg_gross_wage_pln"].ffill()
+
+    # przycinamy do okresu, w ktorym WSZYSTKIE skladniki potrzebne do policzenia
+    # zwrotu portfela ORAZ dochodu gospodarstwa sa dostepne. Kazde zrodlo ma
+    # inny zweryfikowany zakres (ACWI: 1987+, NBP FX: 1995+, EDO/NBP
+    # referencyjna: 1998+, GUS wynagrodzenie: 2002+) -- najkrotszy z nich
+    # wyznacza faktyczny poczatek symulacji (a to, co zostalo naprawione
+    # przez ffill powyzej, tu juz nie jest NaN, wiec nie zostanie ucietego).
+    # Samo dropna po ACWI nie wystarcza: wczesniejsze miesiace mialyby NaN
+    # w pozostalych kolumnach, co przez mnozenie (1+NaN) zatrulyby caly wynik.
+    data = data.dropna(
+        subset=[
+            "acwi_monthly_return",
+            "usd_pln",
+            "edo_reference_monthly_return",
+            "avg_gross_wage_pln",
+        ]
+    )
     data["usd_pln_change"] = data["usd_pln"].pct_change().fillna(0.0)
 
     base_wage = data["avg_gross_wage_pln"].iloc[0]

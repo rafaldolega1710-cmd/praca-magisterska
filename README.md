@@ -19,7 +19,7 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 | Źródło | Zmienna | Sposób pobrania |
 |---|---|---|
 | Aswath Damodaran (NYU Stern) | 10-letnie obligacje skarbowe USA — **niewykorzystywane w głównym pipeline** (patrz sekcja "Symulacja i scenariusze") | Automatyczny (`fetch_damodaran_returns`), dostępne opcjonalnie |
-| NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **wyłącznie od 2002 r.**, wcześniejszych danych publiczne API NBP nie udostępnia |
+| NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **od 1995 r.**: żywe REST API dla 2002+, roczne pliki archiwalne `static.nbp.pl` dla 1995–2001 |
 | GUS BDL API | CPI (inflacja), przeciętne miesięczne wynagrodzenie brutto | Automatyczny (`fetch_gus_cpi`, `fetch_gus_avg_wage`) |
 | MSCI ACWI Index (curvo.eu) | Globalny indeks akcyjny (~2500 spółek, rynki rozwinięte + rozwijające się) — zastępuje S&P 500 + WIG | **Zrzut** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
 | Ministerstwo Finansów, obligacjeskarbowe.pl | Marże serii obligacji EDO — zastępują TBSP.Index | **Zebrane skryptem** (`data/raw/edo_margins.csv`) ze statycznych stron ofertowych — patrz niżej |
@@ -38,7 +38,9 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 2. TBSP.Index: pobierz historyczne notowania z serwisu GPW Benchmark (`gpwbenchmark.pl`) i zapisz jako `data/raw/tbsp.csv`.
 3. Oba pliki obsługiwane są zarówno w formacie polskim stooq (`Data;Otwarcie;...;Zamkniecie;Wolumen`), jak i angielskim (`Date,Open,...,Close,Volume`) — `load_wig_manual`/`load_tbsp_manual` same rozpoznają format.
 
-**Ważne ograniczenie zweryfikowane podczas implementacji:** publiczne API NBP (potrzebne do przeliczenia indeksu MSCI ACWI z USD na PLN) udostępnia dane dopiero od 2002 r. — to teraz **jedyne** wiążące ograniczenie dolne dla pełnej symulacji (indeks ACWI sam w sobie sięga grudnia 1987 r., ale bez kursu walutowego jego wcześniejsza historia jest nieużywalna w tym modelu). Efektywne okno symulacji to styczeń 2002 – lipiec 2026 (~24,6 roku) — kryzys 2008 jest w nim jednym z kilku trudnych okresów w środku szeregu (obok bessy 2000–2002 i COVID-19), a nie punktem startowym.
+**Skąd wzięły się dane NBP sprzed 2002 r.:** żywe REST API NBP (`api.nbp.pl`) ma dane dopiero od 2002 r., ale NBP publikuje też roczne pliki archiwalne (`static.nbp.pl/dane/kursy/Archiwum/archiwum_tab_a_{rok}.xls`) sięgające technicznie do co najmniej 1985 r. — bez zabezpieczeń antybotowych. Ten moduł obsługuje je od 1995 r.: wcześniejszy układ kolumn (dane tygodniowe, kolumny wg nazw krajów w kolejności alfabetycznej) jest inny i nieobsługiwany. `fetch_nbp_usdpln_monthly` sam dobiera właściwe źródło dla każdego roku.
+
+**Ważne ograniczenie zweryfikowane podczas implementacji:** mimo że kurs NBP sięga teraz 1995 r., a indeks ACWI grudnia 1987 r., **faktycznym wiążącym ograniczeniem dolnym całej symulacji pozostaje 2002 r.** — to dane GUS o przeciętnym wynagrodzeniu (potrzebne do wzrostu dochodu gospodarstwa i limitów IKE/IKZE/OKI) mają najkrótszą historię spośród wszystkich źródeł w pipeline, nie kurs walutowy. Wydłużenie NBP do 1995 r. było więc konieczne i poprawne, ale samo w sobie nie wydłużyło jeszcze okna symulacji — zrobiłoby to dopiero znalezienie dłuższej historii danych GUS (nie zrobione w tym etapie). Efektywne okno symulacji to nadal styczeń 2002 – lipiec 2026 (~24,6 roku).
 
 ### Struktura repozytorium
 
@@ -70,7 +72,7 @@ pytest
 
 **Metodologia horyzontu:** symulacja biegnie jedną, nieprzetworzoną historyczną sekwencją zwrotów od pierwszego do ostatniego dostępnego miesiąca — bez cyklicznego powielania danych i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE (25-krotność rocznych wydatków, aktualizowana co miesiąc wraz ze wzrostem wynagrodzeń) nie zostanie osiągnięty w tym oknie, wynik jawnie to raportuje (`fire_reached=False`) zamiast ekstrapolować nieistniejące dane.
 
-**Realny wynik (uruchomienie 2026-08, po przejściu na indeks MSCI ACWI od 2002 r.):**
+**Realny wynik (uruchomienie 2026-08, efektywne okno styczeń 2002 – lipiec 2026, ~24,6 roku — patrz "Ważne ograniczenie" wyżej):**
 
 | Scenariusz | Alokacja | Cel FIRE osiągnięty? | Lata do FIRE | Wartość portfela na koniec okna |
 |---|---|---|---|---|
@@ -114,7 +116,7 @@ Model, zgodnie z podrozdziałem 3.4 pracy, ma charakter ilustracyjnego studium p
 - **Założenie pełnej racjonalności inwestora** — brak paniki sprzedażowej, brak pogoni za wynikiem, konsekwentne stosowanie algorytmu przez cały horyzont symulacji.
 - **Niezmienność polskiego prawa podatkowego** w całym horyzoncie symulacji, mimo że w ostatnich trzech dekadach miały miejsce m.in. reforma 1999, reforma OFE 2014, wprowadzenie PPK w 2019 oraz OKI (uchwalone 2026, w życie od 1.01.2027).
 - **Krótka historia polskich danych rynkowych** (~35 lat dla WIG, ~15–20 lat dla obligacji) w porównaniu do niemal stuletniej historii amerykańskiej — liczba niezależnych, nienakładających się 30-letnich okresów możliwych do wyodrębnienia z danych PL jest rzędu pojedynczych sztuk. Wyniki należy traktować jako ilustrację rzędu wielkości, nie dowód statystyczny.
-- **Praktyczna dolna granica pełnej symulacji to styczeń 2002 r.** (zakres NBP API, potrzebny do przeliczenia indeksu MSCI ACWI z USD na PLN), nie grudzień 1987 r. (start samego indeksu ACWI) ani 1991 r. (start WIG) — patrz sekcja "Dane historyczne" wyżej.
+- **Praktyczna dolna granica pełnej symulacji to styczeń 2002 r.** (zakres danych GUS o przeciętnym wynagrodzeniu — najkrótsza historia spośród wszystkich źródeł), nie grudzień 1987 r. (start indeksu ACWI) ani 1995 r. (zakres kursu NBP, wydłużony w tym etapie, ale nieprzesuwający już faktycznej granicy) — patrz sekcja "Dane historyczne" wyżej.
 - **Roczne dane (GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
 - **Noga akcyjna to jeden globalny indeks (MSCI ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Pierwotnie użyto notowań ETF-u (od 2008 r.), zastąpione samym indeksem (od 1987 r.) po tym, jak start tuż przed kryzysem 2008 okazał się nadmiernie obciążać wynik.
 - **Polska noga obligacji to EDO, nie TBSP.Index** — kolejne odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Dla 40 z 156 miesięcy istnienia EDO (wrzesień 2013 – grudzień 2016) oraz dla bieżącego, jeszcze niezakończonego roku kalendarzowego rzeczywista marża/CPI nie są znane, więc stosowana jest formuła zastępcza `stopa referencyjna NBP + 2 p.p.` zamiast faktycznej konstrukcji EDO — patrz sekcja "Dane historyczne" wyżej.

@@ -9,8 +9,11 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   portfel to wyłącznie akcje (ACWI) i polskie obligacje detaliczne (EDO).
   Funkcje `fetch_damodaran_returns`/`_parse_damodaran_xls` zostają dostępne
   i przetestowane na wypadek przyszłego porównania.
-- NBP API kursów średnich USD/PLN -- pobierany automatycznie, ale wyłącznie
-  od 2002-01-02 (twardy limit publicznego REST API, nie błąd zapytania).
+- NBP kursów średnich USD/PLN -- pobierany automatycznie z dwóch źródeł:
+  żywego REST API dla 2002+ (twardy limit tego konkretnego API, nie błąd
+  zapytania) i rocznych plików archiwalnych `static.nbp.pl` dla 1995-2001
+  (zweryfikowano ręcznie: archiwum sięga dalej, do co najmniej 1985 r., ale
+  z innym układem kolumn przed 1995 r., nieobsługiwanym przez ten moduł).
 - GUS BDL API (CPI, przeciętne wynagrodzenie) -- pobierany automatycznie,
   konkretne ID zmiennych zweryfikowane ręcznie (patrz stałe modułu niżej).
 - Globalny indeks akcyjny (MSCI ACWI Index, ok. 2500 spółek z rynków
@@ -49,16 +52,24 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   oficjalnego, w pełni maszynowego archiwum `static.nbp.pl` (1998+, bez
   zabezpieczeń antybotowych).
 
-Konsekwencja metodologiczna: pełna symulacja obejmująca WSZYSTKIE klasy
-aktywów (w tym część zagraniczną przeliczaną na PLN) jest możliwa dopiero
-od 2002 r. -- to teraz jedyne wiążące ograniczenie dolne, wynikające z
-zakresu NBP API (potrzebnego do przeliczenia USD->PLN indeksu MSCI ACWI).
-Sam indeks MSCI ACWI ma dłuższą historię (od grudnia 1987 r.), ale bez
-kursu walutowego nie da się jej wykorzystać w tym modelu.
+Konsekwencja metodologiczna: kurs USD/PLN (potrzebny do przeliczenia
+indeksu MSCI ACWI) jest dostępny w tym module od 1995 r., a sam indeks
+ACWI jeszcze dłużej (od grudnia 1987 r.; archiwum NBP sięga technicznie
+jeszcze dalej, do co najmniej 1985 r., ale z innym, nieobsługiwanym
+układem kolumn sprzed 1995 r. -- patrz komentarz przy stałych modułu).
+Mimo to **faktycznym, wiążącym ograniczeniem dolnym pełnej symulacji
+pozostaje 2002 r.** -- to dane GUS o przeciętnym wynagrodzeniu (potrzebne
+do wzrostu dochodu gospodarstwa i limitów IKE/IKZE/OKI), a nie kurs walutowy,
+mają najkrótszą historię spośród wszystkich źródeł w tym pipeline. Wydłużenie
+kursu NBP do 1995 r. było więc konieczne, ale samo w sobie nie wydłuża
+jeszcze okna symulacji -- zrobiłoby to dopiero znalezienie dłuższej historii
+danych GUS (nieuwzględnione w tym etapie).
 """
 
 from __future__ import annotations
 
+import datetime as dt
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -74,6 +85,18 @@ DAMODARAN_HEADER_ROW = 19  # zweryfikowane ręcznie na pobranym pliku (0-indekso
 
 NBP_API_BASE = "https://api.nbp.pl/api/exchangerates/rates/A/USD"
 NBP_API_MIN_YEAR = 2002  # zweryfikowane: zapytania o wcześniejsze lata zwracają 404
+
+# Dla lat sprzed 2002 (poza zakresem żywego REST API) NBP publikuje osobne,
+# roczne pliki archiwalne (tabela A) pod static.nbp.pl -- bez zabezpieczeń
+# antybotowych, zweryfikowane ręcznie wstecz aż do 1985 r. Archiwum ma jednak
+# inny układ kolumn przed 1995 r. (dane tygodniowe, kolumny wg nazw krajów
+# w kolejności alfabetycznej, nie kod waluty) -- zamiast dorabiać osobny
+# parser dla tego układu, granica dolna ustawiona jest na 1995 r., gdzie
+# układ jest już spójny z kolejnymi latami (jedna różnica: nagłówek "100 USD"
+# zamiast "1 USD" w 1995 r. -- obsłużone przez wykrywanie mnożnika w parserze).
+NBP_ARCHIVE_URL = "https://static.nbp.pl/dane/kursy/Archiwum/archiwum_tab_a_{year}.xls"
+NBP_ARCHIVE_MIN_YEAR = 1995
+NBP_ARCHIVE_DIR = RAW_DIR / "nbp_archive"
 
 # ID zmiennych GUS BDL API, zweryfikowane ręcznie przez przeglądanie hierarchii
 # /api/v1/subjects (K15 "CENY" -> G405 "WSKAŹNIKI CEN" -> P2955, oraz
@@ -183,8 +206,72 @@ def _fetch_nbp_year(year: int) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["date", "usd_pln"])
 
 
+def _download_nbp_archive_year(year: int, cache_path: Path) -> None:
+    """Pobiera surowy roczny plik archiwum NBP (tabela A) i zapisuje go bez
+    modyfikacji -- wydzielone z parsowania (`_parse_nbp_archive_year`), tak
+    samo jak przy Damodaranie, żeby parsowanie dało się testować bez sieci."""
+    response = requests.get(NBP_ARCHIVE_URL.format(year=year), timeout=30)
+    response.raise_for_status()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(response.content)
+
+
+def _parse_nbp_archive_year(path: Path) -> pd.DataFrame:
+    """Parsuje jeden roczny plik archiwum NBP (1995+, tabela A) i zwraca
+    dzienne kursy średnie USD/PLN (kolumny `date`, `usd_pln`).
+
+    Układ kolumn jest w tych plikach spójny od 1995 r. co do kolumny USD
+    (nagłówek "1 USD", a w 1995 r. wyjątkowo "100 USD"), ale kolumna daty
+    NIE zawsze ma własny nagłówek tekstowy: część lat (np. 2000) w ogóle
+    nie ma osobnej etykiety "Data" -- daty zaczynają się od razu pod
+    nagłówkiem "KURS ŚREDNI" w pierwszej kolumnie. Zamiast więc szukać
+    tekstowej etykiety kolumny daty, ustalamy ją jako pierwszą kolumnę,
+    w której wiersz *pod* nagłówkiem zawiera rzeczywistą datę.
+    """
+    raw = pd.read_excel(path, sheet_name=0, header=None)
+    header_row, usd_col, multiplier = None, None, 1.0
+    for i in range(min(5, len(raw))):
+        for j, val in enumerate(raw.iloc[i]):
+            if not isinstance(val, str):
+                continue
+            m = re.match(r"(\d+)\s*usd", val.strip().lower())
+            if m:
+                header_row, usd_col, multiplier = i, j, float(m.group(1))
+        if usd_col is not None:
+            break
+
+    if usd_col is None:
+        raise ValueError(f"Nie znaleziono kolumny USD w pliku archiwum NBP: {path}")
+
+    first_data_row = raw.iloc[header_row + 1]
+    date_col = next(
+        (j for j, val in enumerate(first_data_row) if isinstance(val, (pd.Timestamp, dt.datetime))),
+        None,
+    )
+    if date_col is None:
+        raise ValueError(f"Nie znaleziono kolumny daty w pliku archiwum NBP: {path}")
+
+    data = raw.iloc[header_row + 1 :, [date_col, usd_col]].copy()
+    data.columns = ["date", "usd_pln"]
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data["usd_pln"] = pd.to_numeric(data["usd_pln"], errors="coerce") / multiplier
+    return data.dropna(subset=["date", "usd_pln"])
+
+
+def _fetch_nbp_daily_for_year(year: int) -> pd.DataFrame:
+    """Zwraca dzienne kursy USD/PLN dla jednego roku, z właściwego źródła:
+    żywego REST API dla lat >= `NBP_API_MIN_YEAR` (2002+), archiwalnego
+    pliku rocznego dla wcześniejszych (od `NBP_ARCHIVE_MIN_YEAR`, 1995+)."""
+    if year >= NBP_API_MIN_YEAR:
+        return _fetch_nbp_year(year)
+    cache_path = NBP_ARCHIVE_DIR / f"archiwum_tab_a_{year}.xls"
+    if not cache_path.exists():
+        _download_nbp_archive_year(year, cache_path)
+    return _parse_nbp_archive_year(cache_path)
+
+
 def fetch_nbp_usdpln_monthly(
-    start_year: int = NBP_API_MIN_YEAR,
+    start_year: int = NBP_ARCHIVE_MIN_YEAR,
     end_year: int | None = None,
     cache_path: Path = RAW_DIR / "nbp_usdpln.csv",
     force_refresh: bool = False,
@@ -193,15 +280,18 @@ def fetch_nbp_usdpln_monthly(
     (ostatnia notowana wartość każdego miesiąca) od `start_year` do
     `end_year` (domyślnie do roku bieżącego).
 
-    `start_year` poniżej 2002 jest odrzucane jawnym `ValueError` --
-    zweryfikowano ręcznie, że publiczne REST API NBP (`api.nbp.pl`) po
-    prostu nie ma wcześniejszych danych (zwraca 404), więc lepiej to
-    zasygnalizować jawnie niż dać cichy, mylący wynik.
+    Lata >= 2002 pochodzą z żywego REST API NBP (`api.nbp.pl`), lata
+    1995-2001 z rocznych plików archiwalnych (`static.nbp.pl`) --
+    `_fetch_nbp_daily_for_year` dobiera właściwe źródło automatycznie.
+    `start_year` poniżej 1995 jest odrzucane jawnym `ValueError`: archiwum
+    NBP sięga wprawdzie dalej (zweryfikowano ręcznie do 1985 r.), ale ma
+    tam inny układ kolumn (dane tygodniowe wg nazw krajów), którego ten
+    moduł nie parsuje -- patrz komentarz przy stałych modułu.
     """
-    if start_year < NBP_API_MIN_YEAR:
+    if start_year < NBP_ARCHIVE_MIN_YEAR:
         raise ValueError(
-            f"NBP API (api.nbp.pl) udostępnia dane dopiero od {NBP_API_MIN_YEAR} r. "
-            f"(zweryfikowano ręcznie -- wcześniejsze zapytania zwracają 404). "
+            f"Ten moduł obsługuje dane NBP dopiero od {NBP_ARCHIVE_MIN_YEAR} r. "
+            f"(wcześniejsze archiwum ma inny, nieobsługiwany układ kolumn). "
             f"Podano start_year={start_year}."
         )
     end_year = end_year or pd.Timestamp.today().year
@@ -210,7 +300,7 @@ def fetch_nbp_usdpln_monthly(
         daily = pd.read_csv(cache_path, parse_dates=["date"])
     else:
         daily = pd.concat(
-            [_fetch_nbp_year(y) for y in range(start_year, end_year + 1)],
+            [_fetch_nbp_daily_for_year(y) for y in range(start_year, end_year + 1)],
             ignore_index=True,
         )
         daily["date"] = pd.to_datetime(daily["date"])
@@ -514,9 +604,10 @@ def build_processed_dataset(
     Użyty jest outer join po indeksie miesięcznym: żadna seria nie jest po
     cichu ucinana do najkrótszej wspólnej historii. Decyzję, czy dany
     scenariusz symulacji wymaga kompletu kolumn (co w praktyce ogranicza
-    start symulacji do 2002 r. -- zakresu NBP API, teraz jedynej wiążącej
-    granicy dolnej -- patrz docstring modułu), podejmuje `simulation.py`,
-    nie ten moduł.
+    start symulacji do 2002 r. -- zakresu danych GUS o przeciętnym
+    wynagrodzeniu, obecnie najkrótszej z wszystkich granic dolnych, mimo że
+    kurs NBP i indeks ACWI same w sobie sięgają dalej wstecz -- patrz
+    docstring modułu), podejmuje `simulation.py`, nie ten moduł.
     """
     cpi_annual = fetch_gus_cpi()
     wage_annual = fetch_gus_avg_wage()
