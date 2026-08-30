@@ -5,6 +5,9 @@ ręcznie dobranych zwrotach -- nie na prawdziwych danych historycznych --
 żeby sprawdzać konkretne własności (poprawność okablowania kaskady,
 opodatkowanie dywidendy, rebalancing, wykrycie celu FIRE), a nie całe
 wieloletnie trajektorie.
+
+Portfel ma dwie nogi: akcje (ACWI) i obligacje (EDO) -- bez globalnych
+obligacji (UST10Y), na wyraźną decyzję użytkownika.
 """
 
 import pandas as pd
@@ -24,7 +27,6 @@ def make_market_data(
     n_months: int = 14,
     start: str = "2020-01",
     acwi_return: float = 0.0,
-    ust10y_return: float = 0.0,
     edo_return: float = 0.0,
     usd_pln: float = 4.0,
     avg_wage: float = 8_000.0,
@@ -34,7 +36,6 @@ def make_market_data(
     return pd.DataFrame(
         {
             "acwi_monthly_return": acwi_return,
-            "ust10y_monthly_return": ust10y_return,
             "usd_pln": usd_pln,
             "edo_reference_monthly_return": edo_return,
             "cpi_prev_year_100": cpi,
@@ -104,11 +105,11 @@ class TestCascadeWiring:
 class TestGrowAccount:
     def test_dividend_tax_applies_only_on_standard_account(self):
         assumptions = SimulationAssumptions(dividend_yield_annual=0.024, acwi_ter_annual=0.0)  # 0.2%/mies.
-        standard = {"equity": 100_000.0, "global_bond": 0.0, "domestic_bond": 0.0}
-        tax_advantaged = {"equity": 100_000.0, "global_bond": 0.0, "domestic_bond": 0.0}
+        standard = {"equity": 100_000.0, "bond": 0.0}
+        tax_advantaged = {"equity": 100_000.0, "bond": 0.0}
 
-        div_tax_standard = _grow_account(standard, 0.01, 0.0, 0.0, assumptions, is_standard=True)
-        div_tax_taxadv = _grow_account(tax_advantaged, 0.01, 0.0, 0.0, assumptions, is_standard=False)
+        div_tax_standard = _grow_account(standard, 0.01, 0.0, assumptions, is_standard=True)
+        div_tax_taxadv = _grow_account(tax_advantaged, 0.01, 0.0, assumptions, is_standard=False)
 
         assert div_tax_standard > 0.0
         assert div_tax_taxadv == 0.0
@@ -117,17 +118,16 @@ class TestGrowAccount:
 
     def test_grow_account_matches_manual_calculation_without_dividend(self):
         assumptions = SimulationAssumptions(dividend_yield_annual=0.0, acwi_ter_annual=0.0)
-        account = {"equity": 1_000.0, "global_bond": 2_000.0, "domestic_bond": 3_000.0}
-        _grow_account(account, 0.05, 0.02, 0.01, assumptions, is_standard=False)
+        account = {"equity": 1_000.0, "bond": 2_000.0}
+        _grow_account(account, 0.05, 0.02, assumptions, is_standard=False)
         assert account["equity"] == pytest.approx(1_000.0 * 1.05)
-        assert account["global_bond"] == pytest.approx(2_000.0 * 1.02)
-        assert account["domestic_bond"] == pytest.approx(3_000.0 * 1.01)
+        assert account["bond"] == pytest.approx(2_000.0 * 1.02)
 
 
 class TestRebalanceStandardAccount:
     def test_overweight_equity_with_gain_generates_capital_gains_tax(self):
-        assumptions = SimulationAssumptions()
-        account = {"equity": 90_000.0, "global_bond": 5_000.0, "domestic_bond": 5_000.0}  # 90/5/5, cel 80/10/10
+        assumptions = SimulationAssumptions()  # 80/20
+        account = {"equity": 90_000.0, "bond": 10_000.0}  # 90/10, cel 80/20
         cost_basis = 60_000.0  # cale konto ma niezrealizowany zysk
         loss_registry = LossCarryforward()
 
@@ -139,13 +139,12 @@ class TestRebalanceStandardAccount:
         assert tax_paid > 0.0
         # sprzedaz doprowadza saldo equity dokladnie do docelowej kwoty (wzgledem
         # oryginalnego -- sprzed podatku -- salda); podatek pomniejsza jedynie
-        # kwote dostepna do odkupienia niedowazonych klas aktywow, wiec ich udzial
-        # w NOWYM (mniejszym o podatek) saldzie bedzie nieznacznie ponizej 10%
+        # kwote dostepna do odkupienia niedowazonej obligacji
         assert account["equity"] == pytest.approx(original_total * assumptions.equity_weight)
 
     def test_account_at_a_loss_registers_loss_not_tax(self):
         assumptions = SimulationAssumptions()
-        account = {"equity": 90_000.0, "global_bond": 5_000.0, "domestic_bond": 5_000.0}
+        account = {"equity": 90_000.0, "bond": 10_000.0}
         cost_basis = 150_000.0  # cale konto ponizej kosztu
         loss_registry = LossCarryforward()
 
@@ -158,14 +157,28 @@ class TestRebalanceStandardAccount:
         assert loss_registry.entries[0][0] == 2024
 
 
+class TestAllocationVariants:
+    def test_equity_weight_controls_bond_bond_split(self):
+        market_data = make_market_data(n_months=3, avg_wage=50_000.0, acwi_return=0.0, edo_return=0.0)
+        archetype = make_archetype(monthly_net_income=3_000.0, savings_rate=0.10)
+        for equity_weight in (0.80, 0.60, 0.40):
+            assumptions = SimulationAssumptions(equity_weight=equity_weight, bond_weight=1 - equity_weight)
+            ledger, summary = run_simulation(
+                archetype, market_data, use_tax_vehicles=False, assumptions=assumptions
+            )
+            assert summary["equity_weight"] == pytest.approx(equity_weight)
+            # 100% nadwyzki na standard, zaraz po pierwszej wplacie, przed wzrostem/rebalancingiem
+            # (miesiac 1) -- proporcja powinna odpowiadac zadanej wadze
+            assert ledger["standard"].iloc[0] > 0
+
+
 class TestMissingTailData:
     def test_nan_tail_in_annual_series_does_not_poison_portfolio_value(self):
-        # regresja: Damodaran/GUS publikuja dane raz w roku, wiec ostatnie
-        # miesiace biezacego roku maja NaN w ust10y_monthly_return/CPI/
-        # wynagrodzeniu, dopoki symulacja sama ich nie uzupelni (ffill) --
-        # bez tego mnozenie salda przez (1+NaN) zeruje caly wynik do konca.
+        # regresja: GUS publikuje CPI/wynagrodzenie raz w roku, wiec ostatnie
+        # miesiace biezacego roku maja NaN, dopoki symulacja sama ich nie
+        # uzupelni (ffill) -- bez tego mnozenie salda przez (1+NaN) zeruje
+        # caly wynik do konca.
         market_data = make_market_data(n_months=6, avg_wage=8_000.0)
-        market_data.loc[market_data.index[-3:], "ust10y_monthly_return"] = float("nan")
         market_data.loc[market_data.index[-3:], "cpi_prev_year_100"] = float("nan")
         market_data.loc[market_data.index[-3:], "avg_gross_wage_pln"] = float("nan")
 
