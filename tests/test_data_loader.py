@@ -14,12 +14,16 @@ import pandas as pd
 import pytest
 
 from src.data_loader import (
+    _nbp_reference_rate_at,
     _parse_damodaran_xls,
     _parse_price_series_to_monthly_returns,
     annualize_to_monthly,
+    build_edo_reference_rate_monthly,
     fetch_gus_series,
+    fetch_nbp_reference_rate,
     fetch_nbp_usdpln_monthly,
     load_acwi_history,
+    load_edo_margins,
 )
 
 
@@ -226,3 +230,120 @@ class TestLoadAcwiHistory:
         assert result.loc[pd.Period("2020-03", freq="M"), "acwi_monthly_return"] == pytest.approx(-0.10)
         # pierwszy miesiac nie ma poprzedniej wartosci do policzenia zwrotu
         assert pd.Period("2020-01", freq="M") not in result.index
+
+
+class TestNbpReferenceRate:
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            fetch_nbp_reference_rate(tmp_path / "missing.csv")
+
+    def test_loads_and_sorts_by_date(self, tmp_path):
+        path = tmp_path / "nbp_ref.csv"
+        path.write_text(
+            "effective_from,reference_rate_pct\n2020-06-01,1.00\n2019-01-01,1.50\n",
+            encoding="utf-8",
+        )
+        df = fetch_nbp_reference_rate(path)
+        assert list(df.index) == sorted(df.index)
+
+    def test_rate_at_picks_last_value_on_or_before_month_end(self, tmp_path):
+        path = tmp_path / "nbp_ref.csv"
+        path.write_text(
+            "effective_from,reference_rate_pct\n"
+            "2019-01-01,1.50\n"
+            "2020-06-15,1.00\n"
+            "2021-01-01,2.00\n",
+            encoding="utf-8",
+        )
+        df = fetch_nbp_reference_rate(path)
+        # czerwiec 2020: zmiana wchodzi w zycie 15.06, wiec obowiazuje do konca miesiaca
+        assert _nbp_reference_rate_at(pd.Period("2020-06", freq="M"), df) == pytest.approx(0.01)
+        # maj 2020: jeszcze stara stawka z 2019
+        assert _nbp_reference_rate_at(pd.Period("2020-05", freq="M"), df) == pytest.approx(0.015)
+
+    def test_rate_before_first_entry_raises(self, tmp_path):
+        path = tmp_path / "nbp_ref.csv"
+        path.write_text("effective_from,reference_rate_pct\n2019-01-01,1.50\n", encoding="utf-8")
+        df = fetch_nbp_reference_rate(path)
+        with pytest.raises(ValueError):
+            _nbp_reference_rate_at(pd.Period("2018-01", freq="M"), df)
+
+
+class TestLoadEdoMargins:
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_edo_margins(tmp_path / "missing.csv")
+
+    def test_loads_indexed_by_issuance_month(self, tmp_path):
+        path = tmp_path / "edo.csv"
+        path.write_text(
+            "issuance_month,first_year_rate_pct,margin_pct\n"
+            "2013-09,,\n"
+            "2017-01,,1.5\n",
+            encoding="utf-8",
+        )
+        df = load_edo_margins(path)
+        assert pd.isna(df.loc["2013-09", "margin_pct"])
+        assert df.loc["2017-01", "margin_pct"] == pytest.approx(1.5)
+
+
+class TestBuildEdoReferenceRateMonthly:
+    def test_uses_cpi_plus_margin_when_margin_known(self, tmp_path):
+        margins_path = tmp_path / "edo.csv"
+        margins_path.write_text(
+            "issuance_month,first_year_rate_pct,margin_pct\n2020-01,,1.5\n", encoding="utf-8"
+        )
+        nbp_path = tmp_path / "nbp.csv"
+        nbp_path.write_text("effective_from,reference_rate_pct\n1998-01-01,10.0\n", encoding="utf-8")
+
+        fake_cpi = pd.DataFrame({"cpi_prev_year_100": [103.4]}, index=pd.Index([2020], name="year"))
+        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+            result = build_edo_reference_rate_monthly(margins_path, nbp_path)
+
+        # inflacja 2020 = 3.4%, marza 1.5% -> stopa roczna 4.9%, przeliczona na miesieczna
+        expected_annual = 0.034 + 0.015
+        expected_monthly = annualize_to_monthly(expected_annual)
+        assert result.loc[pd.Period("2020-01", freq="M"), "edo_reference_monthly_return"] == pytest.approx(
+            expected_monthly
+        )
+
+    def test_falls_back_to_nbp_reference_plus_2pp_when_margin_unknown(self, tmp_path):
+        margins_path = tmp_path / "edo.csv"
+        # brak marzy dla 2015-06 (okres miedzy startem EDO a styczniem 2017)
+        margins_path.write_text(
+            "issuance_month,first_year_rate_pct,margin_pct\n2015-06,,\n", encoding="utf-8"
+        )
+        nbp_path = tmp_path / "nbp.csv"
+        nbp_path.write_text(
+            "effective_from,reference_rate_pct\n2015-01-01,1.50\n", encoding="utf-8"
+        )
+
+        fake_cpi = pd.DataFrame({"cpi_prev_year_100": [100.0]}, index=pd.Index([2015], name="year"))
+        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+            result = build_edo_reference_rate_monthly(margins_path, nbp_path)
+
+        # stopa ref. NBP 1.5% + fallback marzy 2% = 3.5% rocznie
+        expected_monthly = annualize_to_monthly(0.015 + 0.02)
+        assert result.loc[pd.Period("2015-06", freq="M"), "edo_reference_monthly_return"] == pytest.approx(
+            expected_monthly
+        )
+
+    def test_falls_back_when_margin_known_but_cpi_not_yet_published(self, tmp_path):
+        # regresja: rok biezacy (np. 2026) moze miec znana marze EDO, ale GUS
+        # jeszcze nie opublikowal CPI za ten rok -- formula EDO jest wtedy
+        # niepoliczalna i trzeba spasc do stopy referencyjnej NBP + 2%.
+        margins_path = tmp_path / "edo.csv"
+        margins_path.write_text(
+            "issuance_month,first_year_rate_pct,margin_pct\n2026-01,,2.0\n", encoding="utf-8"
+        )
+        nbp_path = tmp_path / "nbp.csv"
+        nbp_path.write_text("effective_from,reference_rate_pct\n2025-01-01,4.00\n", encoding="utf-8")
+
+        fake_cpi = pd.DataFrame({"cpi_prev_year_100": [103.6]}, index=pd.Index([2025], name="year"))
+        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+            result = build_edo_reference_rate_monthly(margins_path, nbp_path)
+
+        expected_monthly = annualize_to_monthly(0.04 + 0.02)
+        assert result.loc[pd.Period("2026-01", freq="M"), "edo_reference_monthly_return"] == pytest.approx(
+            expected_monthly
+        )

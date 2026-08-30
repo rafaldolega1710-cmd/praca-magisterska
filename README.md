@@ -14,7 +14,7 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 
 ### Dane historyczne
 
-**Noga akcyjna portfela to jeden globalny ETF (iShares MSCI ACWI, ticker `ACWI`), nie osobno S&P 500 i WIG**, jak pierwotnie zakładał brief (sekcja 2/3.2 pracy) — świadoma decyzja, uproszczenie względem oryginalnej metodologii, którą warto odzwierciedlić przy pisaniu rozdziału IV. Noga obligacji (globalne UST10Y + polski TBSP.Index) pozostaje bez zmian.
+**Noga akcyjna portfela to jeden globalny ETF (iShares MSCI ACWI, ticker `ACWI`), nie osobno S&P 500 i WIG**, a **polska noga obligacji to detaliczne obligacje EDO (10-letnie, indeksowane inflacją), nie TBSP.Index** — dwie świadome decyzje, uproszczenia względem oryginalnej metodologii z sekcji 2/3.2 pracy, które warto odzwierciedlić przy pisaniu rozdziału IV. Noga globalnych obligacji (Damodaran, UST10Y) pozostaje bez zmian.
 
 | Źródło | Zmienna | Sposób pobrania |
 |---|---|---|
@@ -22,14 +22,20 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 | NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **wyłącznie od 2002 r.**, wcześniejszych danych publiczne API NBP nie udostępnia |
 | GUS BDL API | CPI (inflacja), przeciętne miesięczne wynagrodzenie brutto | Automatyczny (`fetch_gus_cpi`, `fetch_gus_avg_wage`) |
 | iShares MSCI ACWI ETF (Yahoo Finance) | Globalny ETF akcyjny — zastępuje S&P 500 + WIG | **Zrzut z sesji przeglądarki** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
-| GPW Benchmark | TBSP.Index (polskie obligacje) | **Ręczny** — brak stabilnego, darmowego API |
+| Ministerstwo Finansów, obligacjeskarbowe.pl | Marże serii obligacji EDO — zastępują TBSP.Index | **Zebrane skryptem** (`data/raw/edo_margins.csv`) ze statycznych stron ofertowych — patrz niżej |
+| NBP, archiwum stóp procentowych | Stopa referencyjna NBP — formuła zastępcza tam, gdzie marża EDO nieznana | Automatyczny/zrzut (`data/raw/nbp_reference_rate.csv`, `fetch_nbp_reference_rate`) |
 | GPW / stooq.pl | Indeks WIG | **Ręczny, opcjonalny** — nieużywany w głównym pipeline od czasu przejścia na globalny ETF; `load_wig_manual` pozostaje dostępny na potrzeby ewentualnego porównania z rynkiem polskim w rozdziale IV |
+| GPW Benchmark | TBSP.Index | **Ręczny, opcjonalny** — analogicznie, `load_tbsp_manual` pozostaje dostępny na potrzeby porównania |
+
+**Skąd wzięły się dane EDO i stopy referencyjnej NBP:**
+- **Stopa referencyjna NBP** pochodzi z oficjalnego, w pełni maszynowo czytelnego archiwum `static.nbp.pl/dane/stopy/stopy_procentowe_archiwum.xml` (bez zabezpieczeń antybotowych) — obejmuje okres od 26.02.1998 do dziś.
+- **Marże EDO** zostały zebrane skryptem odpytującym ~150 statycznych stron ofertowych Ministerstwa Finansów (`obligacjeskarbowe.pl/oferta-obligacji/obligacje-10-letnie-edo/edoMMYY/`, gdzie `MMYY` to miesiąc/rok wykupu = miesiąc emisji + 10 lat) — strony te są server-rendered, więc dają się pobrać zwykłym zapytaniem HTTP. EDO wystartowało we wrześniu 2013 r., ale strony archiwalne przechowują konkretną wartość marży dopiero od stycznia 2017 r. — dla wcześniejszych miesięcy (wrzesień 2013 – grudzień 2016) i dla bieżącego roku, zanim GUS opublikuje jego CPI, stosowana jest formuła zastępcza: **stopa referencyjna NBP + 2 p.p.** (zgodnie z instrukcją — 2 p.p. to obowiązująca od dłuższego czasu marża EDO).
 
 **Skąd wzięły się dane ACWI:** żadne z prawdziwie wypróbowanych źródeł nie dało się zeskryptować z tego środowiska — REST API Yahoo Finance blokuje zapytania („Edge: Too Many Requests” już przy pierwszym), `stooq.com`/`stooq.pl` mają wyzwanie antybotowe, `nasdaq.com` było nieosiągalne, `macrotrends.net` zwrócił 403. Dane w `data/raw/acwi_monthly.csv` pochodzą z rzeczywistej sesji przeglądarki na `finance.yahoo.com/quote/ACWI/history` (zakres „Max”, interwał „Monthly”) — to zrzut stanu na dzień pobrania, nie odtwarzalne jednym poleceniem. Odświeżenie o kolejne miesiące wymaga powtórzenia tych samych kroków ręcznie (lub poproszenia o to ponownie).
 
-**Ręczne pobranie TBSP.Index (i opcjonalnie WIG):**
-1. TBSP.Index: pobierz historyczne notowania z serwisu GPW Benchmark (`gpwbenchmark.pl`) i zapisz jako `data/raw/tbsp.csv`.
-2. WIG (opcjonalnie, do analiz porównawczych): `stooq.pl/q/d/l/?s=wig&i=m` w przeglądarce, zapisz jako `data/raw/wig.csv`.
+**Ręczne pobranie WIG i TBSP.Index (opcjonalne, tylko do analiz porównawczych — żadne z nich nie jest już wymagane przez `build_processed_dataset`):**
+1. WIG: `stooq.pl/q/d/l/?s=wig&i=m` w przeglądarce, zapisz jako `data/raw/wig.csv`.
+2. TBSP.Index: pobierz historyczne notowania z serwisu GPW Benchmark (`gpwbenchmark.pl`) i zapisz jako `data/raw/tbsp.csv`.
 3. Oba pliki obsługiwane są zarówno w formacie polskim stooq (`Data;Otwarcie;...;Zamkniecie;Wolumen`), jak i angielskim (`Date,Open,...,Close,Volume`) — `load_wig_manual`/`load_tbsp_manual` same rozpoznają format.
 
 **Ważne ograniczenie zweryfikowane podczas implementacji:** publiczne API NBP (potrzebne do przeliczenia zagranicznej części portfela na PLN) udostępnia dane dopiero od 2002 r. Fundusz ACWI powstał dopiero w marcu 2008 r. — to on, nie NBP, jest teraz wiążącym ograniczeniem dolnym dla pełnej symulacji wszystkich klas aktywów. Krótsza historia niż dawałby S&P 500 (od 1928 r.) jest świadomym kosztem przejścia na jeden, faktycznie inwestowalny globalny instrument.
@@ -68,3 +74,4 @@ Model, zgodnie z podrozdziałem 3.4 pracy, ma charakter ilustracyjnego studium p
 - **Praktyczna dolna granica pełnej symulacji to marzec 2008 r.** (data powstania funduszu ACWI), nie 2002 r. (zakres NBP) ani 1991 r. (start WIG) — patrz sekcja "Dane historyczne" wyżej.
 - **Roczne dane (Damodaran, GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
 - **Noga akcyjna to jeden globalny ETF (ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika), kosztem krótszej historii (2008+ zamiast 1928+ dla USA) w zamian za jeden, spójny, faktycznie inwestowalny instrument zamiast dwóch teoretycznych indeksów.
+- **Polska noga obligacji to EDO, nie TBSP.Index** — kolejne odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Dla 40 z 156 miesięcy istnienia EDO (wrzesień 2013 – grudzień 2016) oraz dla bieżącego, jeszcze niezakończonego roku kalendarzowego rzeczywista marża/CPI nie są znane, więc stosowana jest formuła zastępcza `stopa referencyjna NBP + 2 p.p.` zamiast faktycznej konstrukcji EDO — patrz sekcja "Dane historyczne" wyżej.
