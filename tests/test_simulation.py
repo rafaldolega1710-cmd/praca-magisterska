@@ -188,6 +188,22 @@ class TestMissingTailData:
         assert not pd.isna(summary["final_portfolio_value"])
         assert not ledger["portfolio_value"].isna().any()
 
+    def test_nan_head_in_usd_pln_does_not_poison_portfolio_value(self):
+        # regresja: indeks MSCI ACWI siega 1988 r., ale kurs USD/PLN z NBP
+        # dopiero 2002 r. -- wczesniejsze miesiace maja NaN w usd_pln, dopoki
+        # symulacja ich nie odetnie (nie da sie ich forward-fillowac, bo to
+        # brak danych na POCZATKU szeregu, a nie na koncu).
+        market_data = make_market_data(n_months=6, avg_wage=8_000.0)
+        market_data.loc[market_data.index[:2], "usd_pln"] = float("nan")
+
+        archetype = make_archetype(monthly_net_income=5_000.0, savings_rate=0.10)
+        ledger, summary = run_simulation(archetype, market_data, use_tax_vehicles=True)
+
+        assert not pd.isna(summary["final_portfolio_value"])
+        assert not ledger["portfolio_value"].isna().any()
+        # symulacja powinna zaczac sie dopiero od 3. miesiaca (pierwszy z realnym usd_pln)
+        assert len(ledger) == 4
+
 
 class TestFireDetection:
     def test_huge_return_triggers_fire_detection(self):

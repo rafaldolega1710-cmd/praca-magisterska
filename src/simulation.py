@@ -207,7 +207,14 @@ def run_simulation(
     """
     assumptions = assumptions or SimulationAssumptions()
 
-    data = market_data.dropna(subset=["acwi_monthly_return"]).copy()
+    # przycinamy do okresu, w ktorym WSZYSTKIE trzy skladniki zwrotu portfela
+    # sa dostepne -- odkad indeks MSCI ACWI siega 1988 r., ale kurs USD/PLN
+    # z NBP dopiero 2002 r. (patrz data_loader.py), samo dropna po ACWI nie
+    # wystarcza: wczesniejsze miesiace mialyby NaN w usd_pln, co przez
+    # mnozenie (1+NaN) zatrulyby caly wynik od pierwszego miesiaca.
+    data = market_data.dropna(
+        subset=["acwi_monthly_return", "usd_pln", "edo_reference_monthly_return"]
+    ).copy()
     data = data.sort_index()
     # CPI i przecietne wynagrodzenie sa publikowane raz w roku -- dla miesiecy
     # nowszych niz ostatni opublikowany rok (np. biezacy rok kalendarzowy)

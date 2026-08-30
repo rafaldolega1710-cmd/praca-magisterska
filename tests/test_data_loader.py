@@ -219,10 +219,10 @@ class TestLoadAcwiHistory:
         with pytest.raises(FileNotFoundError, match="README"):
             load_acwi_history(missing)
 
-    def test_computes_monthly_returns_from_adj_close(self, tmp_path):
+    def test_computes_monthly_returns_from_index_level(self, tmp_path):
         path = tmp_path / "acwi_monthly.csv"
         path.write_text(
-            "month,adj_close\n2020-01,100.0\n2020-02,110.0\n2020-03,99.0\n",
+            "month,index_level\n2020-01,100.0\n2020-02,110.0\n2020-03,99.0\n",
             encoding="utf-8",
         )
         result = load_acwi_history(path)

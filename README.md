@@ -21,7 +21,7 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 | Aswath Damodaran (NYU Stern) | 10-letnie obligacje skarbowe USA — **niewykorzystywane w głównym pipeline** (patrz sekcja "Symulacja i scenariusze") | Automatyczny (`fetch_damodaran_returns`), dostępne opcjonalnie |
 | NBP, tabela A | Kurs średni USD/PLN | Automatyczny (`fetch_nbp_usdpln_monthly`) — **wyłącznie od 2002 r.**, wcześniejszych danych publiczne API NBP nie udostępnia |
 | GUS BDL API | CPI (inflacja), przeciętne miesięczne wynagrodzenie brutto | Automatyczny (`fetch_gus_cpi`, `fetch_gus_avg_wage`) |
-| iShares MSCI ACWI ETF (Yahoo Finance) | Globalny ETF akcyjny — zastępuje S&P 500 + WIG | **Zrzut z sesji przeglądarki** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
+| MSCI ACWI Index (curvo.eu) | Globalny indeks akcyjny (~2500 spółek, rynki rozwinięte + rozwijające się) — zastępuje S&P 500 + WIG | **Zrzut** (`data/raw/acwi_monthly.csv`) — patrz niżej, nie jest to wynik automatycznego zapytania |
 | Ministerstwo Finansów, obligacjeskarbowe.pl | Marże serii obligacji EDO — zastępują TBSP.Index | **Zebrane skryptem** (`data/raw/edo_margins.csv`) ze statycznych stron ofertowych — patrz niżej |
 | NBP, archiwum stóp procentowych | Stopa referencyjna NBP — formuła zastępcza tam, gdzie marża EDO nieznana | Automatyczny/zrzut (`data/raw/nbp_reference_rate.csv`, `fetch_nbp_reference_rate`) |
 | GPW / stooq.pl | Indeks WIG | **Ręczny, opcjonalny** — nieużywany w głównym pipeline od czasu przejścia na globalny ETF; `load_wig_manual` pozostaje dostępny na potrzeby ewentualnego porównania z rynkiem polskim w rozdziale IV |
@@ -31,14 +31,14 @@ Deterministyczny, miesięczny model symulacji akumulacji kapitału w ramach konc
 - **Stopa referencyjna NBP** pochodzi z oficjalnego, w pełni maszynowo czytelnego archiwum `static.nbp.pl/dane/stopy/stopy_procentowe_archiwum.xml` (bez zabezpieczeń antybotowych) — obejmuje okres od 26.02.1998 do dziś.
 - **Marże EDO** zostały zebrane skryptem odpytującym ~150 statycznych stron ofertowych Ministerstwa Finansów (`obligacjeskarbowe.pl/oferta-obligacji/obligacje-10-letnie-edo/edoMMYY/`, gdzie `MMYY` to miesiąc/rok wykupu = miesiąc emisji + 10 lat) — strony te są server-rendered, więc dają się pobrać zwykłym zapytaniem HTTP. EDO wystartowało we wrześniu 2013 r., ale strony archiwalne przechowują konkretną wartość marży dopiero od stycznia 2017 r. — dla wcześniejszych miesięcy (wrzesień 2013 – grudzień 2016) i dla bieżącego roku, zanim GUS opublikuje jego CPI, stosowana jest formuła zastępcza: **stopa referencyjna NBP + 2 p.p.** (zgodnie z instrukcją — 2 p.p. to obowiązująca od dłuższego czasu marża EDO).
 
-**Skąd wzięły się dane ACWI:** żadne z prawdziwie wypróbowanych źródeł nie dało się zeskryptować z tego środowiska — REST API Yahoo Finance blokuje zapytania („Edge: Too Many Requests” już przy pierwszym), `stooq.com`/`stooq.pl` mają wyzwanie antybotowe, `nasdaq.com` było nieosiągalne, `macrotrends.net` zwrócił 403. Dane w `data/raw/acwi_monthly.csv` pochodzą z rzeczywistej sesji przeglądarki na `finance.yahoo.com/quote/ACWI/history` (zakres „Max”, interwał „Monthly”) — to zrzut stanu na dzień pobrania, nie odtwarzalne jednym poleceniem. Odświeżenie o kolejne miesiące wymaga powtórzenia tych samych kroków ręcznie (lub poproszenia o to ponownie).
+**Skąd wzięły się dane MSCI ACWI:** pierwsza wersja używała notowań ETF-u iShares MSCI ACWI (od marca 2008 — data powstania funduszu), ale start tuż przed globalnym kryzysem finansowym 2008 nadmiernie obciążał wynik symulacji wrażliwością na wybór akurat tego, szczególnie niekorzystnego okresu jako punktu startowego. Zastąpiono to samym **indeksem** MSCI ACWI (nie konkretnym funduszem), którego historia sięga grudnia 1987 r. — REST API dostawców danych giełdowych (Yahoo Finance, stooq, nasdaq.com, macrotrends.net) było zablokowane lub niedostępne z tego środowiska, więc dane w `data/raw/acwi_monthly.csv` pochodzą z wbudowanej funkcji eksportu CSV serwisu `curvo.eu` (`curvo.eu/backtest/en/market-index/msci-acwi`, waluta USD) — to zamierzony, legalny sposób pobrania danych z tej strony (przycisk „CSV” pod wykresem), nie obejście żadnego zabezpieczenia. To zrzut stanu na dzień pobrania; odświeżenie o kolejne miesiące wymaga powtórzenia tego samego pobrania.
 
 **Ręczne pobranie WIG i TBSP.Index (opcjonalne, tylko do analiz porównawczych — żadne z nich nie jest już wymagane przez `build_processed_dataset`):**
 1. WIG: `stooq.pl/q/d/l/?s=wig&i=m` w przeglądarce, zapisz jako `data/raw/wig.csv`.
 2. TBSP.Index: pobierz historyczne notowania z serwisu GPW Benchmark (`gpwbenchmark.pl`) i zapisz jako `data/raw/tbsp.csv`.
 3. Oba pliki obsługiwane są zarówno w formacie polskim stooq (`Data;Otwarcie;...;Zamkniecie;Wolumen`), jak i angielskim (`Date,Open,...,Close,Volume`) — `load_wig_manual`/`load_tbsp_manual` same rozpoznają format.
 
-**Ważne ograniczenie zweryfikowane podczas implementacji:** publiczne API NBP (potrzebne do przeliczenia zagranicznej części portfela na PLN) udostępnia dane dopiero od 2002 r. Fundusz ACWI powstał dopiero w marcu 2008 r. — to on, nie NBP, jest teraz wiążącym ograniczeniem dolnym dla pełnej symulacji wszystkich klas aktywów. Krótsza historia niż dawałby S&P 500 (od 1928 r.) jest świadomym kosztem przejścia na jeden, faktycznie inwestowalny globalny instrument.
+**Ważne ograniczenie zweryfikowane podczas implementacji:** publiczne API NBP (potrzebne do przeliczenia indeksu MSCI ACWI z USD na PLN) udostępnia dane dopiero od 2002 r. — to teraz **jedyne** wiążące ograniczenie dolne dla pełnej symulacji (indeks ACWI sam w sobie sięga grudnia 1987 r., ale bez kursu walutowego jego wcześniejsza historia jest nieużywalna w tym modelu). Efektywne okno symulacji to styczeń 2002 – lipiec 2026 (~24,6 roku) — kryzys 2008 jest w nim jednym z kilku trudnych okresów w środku szeregu (obok bessy 2000–2002 i COVID-19), a nie punktem startowym.
 
 ### Struktura repozytorium
 
@@ -64,30 +64,30 @@ pytest
 
 ### Symulacja i scenariusze
 
-`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) w **3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60)** — 12 przebiegów łącznie — na realnych danych historycznych (`build_processed_dataset()`, okno kwiecień 2008 – lipiec 2026) i zapisuje wyniki do `results/scenario_{kod}_equity{wariant}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
+`python -m src.scenarios` uruchamia wszystkie 4 scenariusze (macierz: 2 archetypy × z/bez wehikułów podatkowych, podrozdz. 3.4 pracy) w **3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60)** — 12 przebiegów łącznie — na realnych danych historycznych (`build_processed_dataset()`, efektywne okno styczeń 2002 – lipiec 2026, ~24,6 roku — patrz sekcja "Dane historyczne") i zapisuje wyniki do `results/scenario_{kod}_equity{wariant}_monthly.csv` (pełna ścieżka miesięczna) oraz `results/summary.csv` (podsumowanie).
 
-**Portfel ma dwie nogi: akcje (globalny ETF ACWI) i obligacje (wyłącznie polskie detaliczne EDO)** — bez globalnych obligacji (Damodaran/UST10Y) i bez TBSP.Index, na wyraźną decyzję użytkownika. Testowanie kilku proporcji akcje/obligacje to bezpośrednia realizacja "elastycznej alokacji aktywów" z hipotezy badawczej pracy (patrz Wstęp).
+**Portfel ma dwie nogi: akcje (indeks MSCI ACWI) i obligacje (wyłącznie polskie detaliczne EDO)** — bez globalnych obligacji (Damodaran/UST10Y) i bez TBSP.Index, na wyraźną decyzję użytkownika. Testowanie kilku proporcji akcje/obligacje to bezpośrednia realizacja "elastycznej alokacji aktywów" z hipotezy badawczej pracy (patrz Wstęp).
 
-**Metodologia horyzontu:** symulacja biegnie jedną, nieprzetworzoną historyczną sekwencją zwrotów od pierwszego do ostatniego dostępnego miesiąca — bez cyklicznego powielania danych i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE (25-krotność rocznych wydatków, aktualizowana co miesiąc wraz ze wzrostem wynagrodzeń) nie zostanie osiągnięty w tym ~18-letnim oknie, wynik jawnie to raportuje (`fire_reached=False`) zamiast ekstrapolować nieistniejące dane.
+**Metodologia horyzontu:** symulacja biegnie jedną, nieprzetworzoną historyczną sekwencją zwrotów od pierwszego do ostatniego dostępnego miesiąca — bez cyklicznego powielania danych i bez wielu okien startowych (Monte Carlo). Jeśli cel FIRE (25-krotność rocznych wydatków, aktualizowana co miesiąc wraz ze wzrostem wynagrodzeń) nie zostanie osiągnięty w tym oknie, wynik jawnie to raportuje (`fire_reached=False`) zamiast ekstrapolować nieistniejące dane.
 
-**Realny wynik (uruchomienie 2026-08):**
+**Realny wynik (uruchomienie 2026-08, po przejściu na indeks MSCI ACWI od 2002 r.):**
 
 | Scenariusz | Alokacja | Cel FIRE osiągnięty? | Lata do FIRE | Wartość portfela na koniec okna |
 |---|---|---|---|---|
-| A1 (Informatyk, z programami) | 80/20 | **Tak** | 18,0 | 9,03 mln zł |
-| A1 | 60/40 | Nie | — | 8,14 mln zł |
-| A1 | 40/60 | Nie | — | 7,31 mln zł |
-| A2 (Informatyk, bez programów) | 80/20 | **Tak** | 18,2 | 8,66 mln zł |
-| A2 | 60/40 | Nie | — | 7,82 mln zł |
-| A2 | 40/60 | Nie | — | 7,08 mln zł |
-| B1 (Rodzina 2+2, z programami) | 80/20 | Nie | — | 2,74 mln zł |
-| B2 (Rodzina 2+2, bez programów) | 80/20 | Nie | — | 2,37 mln zł |
+| A1 (Informatyk, z programami) | 80/20 | **Tak** | 17,7 | 18,1 mln zł |
+| A1 | 60/40 | **Tak** | 18,8 | 16,2 mln zł |
+| A1 | 40/60 | **Tak** | 19,8 | 14,4 mln zł |
+| A2 (Informatyk, bez programów) | 80/20 | **Tak** | 17,8 | 17,3 mln zł |
+| A2 | 60/40 | **Tak** | 18,9 | 15,5 mln zł |
+| A2 | 40/60 | **Tak** | 19,8 | 13,9 mln zł |
+| B1 (Rodzina 2+2, z programami) | 80/20 | Nie | — | 5,50 mln zł |
+| B2 (Rodzina 2+2, bez programów) | 80/20 | Nie | — | 4,75 mln zł |
 
-(B1/B2 przy 60/40 i 40/60 analogicznie niżej — pełne dane w `results/summary.csv`.)
+(B1/B2 przy 60/40 i 40/60 oraz pełna precyzja liczb — w `results/summary.csv`.)
 
 Dwie ilustracje bezpośrednio odpowiadające na pytania hipotezy badawczej:
-- **Wartość tarczy podatkowej (A1 vs A2, ta sama alokacja 80/20):** oba scenariusze osiągają cel w tym samym ~18-letnim oknie, ale A1 (z IKE/IKZE/PPK/OKI) robi to **szybciej** (18,0 vs 18,2 roku) i kończy z **wyższym** portfelem (9,03 mln vs 8,66 mln zł) — różnica to policzalna wartość korzyści podatkowej III filaru.
-- **Wpływ alokacji (80/20 vs 60/40 vs 40/60, ten sam scenariusz):** wyższy udział akcji wyraźnie przyspiesza dojście do celu (tylko wariant 80/20 domyka się w dostępnym oknie danych) kosztem większej zmienności portfela, której ta tabela nie pokazuje wprost — miesięczne ścieżki w `results/*_monthly.csv` pozwalają to zobaczyć.
+- **Wartość tarczy podatkowej (A1 vs A2, ta sama alokacja):** przy każdej z 3 alokacji A1 (z IKE/IKZE/PPK/OKI) osiąga cel **szybciej** niż A2 (np. 80/20: 17,7 vs 17,8 roku) i kończy z **wyższym** portfelem (18,1 vs 17,3 mln zł) — różnica to policzalna wartość korzyści podatkowej III filaru, widoczna teraz przy każdym poziomie ryzyka portfela, nie tylko przy jednej alokacji.
+- **Wpływ alokacji (80/20 vs 60/40 vs 40/60, ten sam scenariusz):** dla archetypu A wyższy udział akcji konsekwentnie przyspiesza dojście do celu (17,7 → 18,8 → 19,8 roku) i podnosi wartość końcową, kosztem większej zmienności portfela, której ta tabela nie pokazuje wprost — miesięczne ścieżki w `results/*_monthly.csv` pozwalają to zobaczyć. Archetyp B (niższa stopa oszczędności) nie domyka się w żadnym wariancie w dostępnym ~24,6-letnim oknie.
 
 **Założenia modelu (`SimulationAssumptions`, `src/simulation.py`) — jawnie udokumentowane uproszczenia:**
 
@@ -114,8 +114,8 @@ Model, zgodnie z podrozdziałem 3.4 pracy, ma charakter ilustracyjnego studium p
 - **Założenie pełnej racjonalności inwestora** — brak paniki sprzedażowej, brak pogoni za wynikiem, konsekwentne stosowanie algorytmu przez cały horyzont symulacji.
 - **Niezmienność polskiego prawa podatkowego** w całym horyzoncie symulacji, mimo że w ostatnich trzech dekadach miały miejsce m.in. reforma 1999, reforma OFE 2014, wprowadzenie PPK w 2019 oraz OKI (uchwalone 2026, w życie od 1.01.2027).
 - **Krótka historia polskich danych rynkowych** (~35 lat dla WIG, ~15–20 lat dla obligacji) w porównaniu do niemal stuletniej historii amerykańskiej — liczba niezależnych, nienakładających się 30-letnich okresów możliwych do wyodrębnienia z danych PL jest rzędu pojedynczych sztuk. Wyniki należy traktować jako ilustrację rzędu wielkości, nie dowód statystyczny.
-- **Praktyczna dolna granica pełnej symulacji to marzec 2008 r.** (data powstania funduszu ACWI), nie 2002 r. (zakres NBP) ani 1991 r. (start WIG) — patrz sekcja "Dane historyczne" wyżej.
-- **Roczne dane (Damodaran, GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
-- **Noga akcyjna to jeden globalny ETF (ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika), kosztem krótszej historii (2008+ zamiast 1928+ dla USA) w zamian za jeden, spójny, faktycznie inwestowalny instrument zamiast dwóch teoretycznych indeksów.
+- **Praktyczna dolna granica pełnej symulacji to styczeń 2002 r.** (zakres NBP API, potrzebny do przeliczenia indeksu MSCI ACWI z USD na PLN), nie grudzień 1987 r. (start samego indeksu ACWI) ani 1991 r. (start WIG) — patrz sekcja "Dane historyczne" wyżej.
+- **Roczne dane (GUS) rozbite na miesiące metodą równomiernej kapitalizacji geometrycznej** (`data_loader.annualize_to_monthly`) — każdy miesiąc danego roku dostaje tę samą stopę zwrotu; rzeczywista wewnątrzroczna zmienność i sezonowość nie są odwzorowane.
+- **Noga akcyjna to jeden globalny indeks (MSCI ACWI), nie osobno rynek USA i Polski** — odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Pierwotnie użyto notowań ETF-u (od 2008 r.), zastąpione samym indeksem (od 1987 r.) po tym, jak start tuż przed kryzysem 2008 okazał się nadmiernie obciążać wynik.
 - **Polska noga obligacji to EDO, nie TBSP.Index** — kolejne odejście od architektury z sekcji 2/3.2 pracy (na decyzję użytkownika). Dla 40 z 156 miesięcy istnienia EDO (wrzesień 2013 – grudzień 2016) oraz dla bieżącego, jeszcze niezakończonego roku kalendarzowego rzeczywista marża/CPI nie są znane, więc stosowana jest formuła zastępcza `stopa referencyjna NBP + 2 p.p.` zamiast faktycznej konstrukcji EDO — patrz sekcja "Dane historyczne" wyżej.
 - **Portfel nie zawiera globalnych obligacji** — dwie nogi (akcje ACWI, obligacje EDO), nie trzy z pierwotnego briefu (akcje globalne + obligacje globalne + obligacje polskie). Uproszczenie na wyraźną decyzję użytkownika; obniża dywersyfikację geograficzną części dłużnej portfela.

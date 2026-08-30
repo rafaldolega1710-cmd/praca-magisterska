@@ -13,17 +13,22 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   od 2002-01-02 (twardy limit publicznego REST API, nie błąd zapytania).
 - GUS BDL API (CPI, przeciętne wynagrodzenie) -- pobierany automatycznie,
   konkretne ID zmiennych zweryfikowane ręcznie (patrz stałe modułu niżej).
-- Globalny ETF akcyjny (iShares MSCI ACWI, ticker ACWI) -- ZASTĘPUJE
-  pierwotny podział "S&P 500 (Damodaran) + WIG" jedną globalną nogą akcyjną,
-  na wyraźną decyzję użytkownika (odejście od architektury opisanej w
-  sekcji 2/3.2 pracy). Dane historyczne uzyskane przez rzeczywistą sesję
-  przeglądarki na stronie Yahoo Finance -- nie istnieje tu skryptowalne
-  API: `query1/query2.finance.yahoo.com` blokuje zapytania z tego
-  środowiska ("Edge: Too Many Requests" nawet przy pierwszym zapytaniu),
-  `stooq.com` i `stooq.pl` chronione są wyzwaniem antybotowym, `nasdaq.com`
-  było nieosiągalne, a `macrotrends.net` zwrócił 403. Odświeżenie tych
-  danych w przyszłości wymaga powtórzenia tego samego, ręcznego/przez
-  przeglądarkę procesu -- patrz README, sekcja "Dane historyczne".
+- Globalny indeks akcyjny (MSCI ACWI Index, ok. 2500 spółek z rynków
+  rozwiniętych i rozwijających się) -- ZASTĘPUJE pierwotny podział
+  "S&P 500 (Damodaran) + WIG" jedną globalną nogą akcyjną, na wyraźną
+  decyzję użytkownika (odejście od architektury opisanej w sekcji 2/3.2
+  pracy). Pierwsza wersja używała notowań ETF-u iShares MSCI ACWI
+  (od marca 2008), ale start tuż przed kryzysem 2008 nadmiernie obciążał
+  wynik -- zastąpiono to samym indeksem (nie konkretnym funduszem), którego
+  historia sięga grudnia 1987 r. (464 miesiące, obejmujące krach 1987,
+  bessę dot-com, kryzys 2008 i COVID jako kolejne, nie jedyne trudne
+  okresy). Dane pochodzą z wbudowanej funkcji eksportu CSV serwisu
+  curvo.eu (curvo.eu/backtest/en/market-index/msci-acwi) -- REST API
+  dostawców danych giełdowych (`query1/query2.finance.yahoo.com`,
+  `stooq.com`/`stooq.pl`, `nasdaq.com`, `macrotrends.net`) było
+  zablokowane lub niedostępne z tego środowiska. Odświeżenie tych danych
+  w przyszłości wymaga powtórzenia tego samego pobrania -- patrz README,
+  sekcja "Dane historyczne".
 - WIG i TBSP.Index -- BRAK automatycznego pobierania: typowe źródło
   (stooq.pl) jest chronione wyzwaniem antybotowym (JS proof-of-work), którego
   celowo nie obchodzę. `load_wig_manual`/`load_tbsp_manual` wczytują plik
@@ -46,10 +51,10 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
 
 Konsekwencja metodologiczna: pełna symulacja obejmująca WSZYSTKIE klasy
 aktywów (w tym część zagraniczną przeliczaną na PLN) jest możliwa dopiero
-od 2002 r. (zakres NBP API), a globalna noga akcyjna (ACWI) dodatkowo
-zawęża to do marca 2008 r. (data powstania funduszu) -- krótsza historia
-niż dawałby S&P 500 (od 1928 r.), ale za to jeden, spójny, faktycznie
-inwestowalny instrument zamiast dwóch osobnych indeksów.
+od 2002 r. -- to teraz jedyne wiążące ograniczenie dolne, wynikające z
+zakresu NBP API (potrzebnego do przeliczenia USD->PLN indeksu MSCI ACWI).
+Sam indeks MSCI ACWI ma dłuższą historię (od grudnia 1987 r.), ale bez
+kursu walutowego nie da się jej wykorzystać w tym modelu.
 """
 
 from __future__ import annotations
@@ -432,34 +437,46 @@ def load_tbsp_manual(path: Path = RAW_DIR / "tbsp.csv") -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Globalny ETF akcyjny (iShares MSCI ACWI) -- zastępuje S&P 500 + WIG
+# Globalny indeks akcyjny (MSCI ACWI Index) -- zastępuje S&P 500 + WIG
 # ---------------------------------------------------------------------------
 
 def load_acwi_history(path: Path = RAW_DIR / "acwi_monthly.csv") -> pd.DataFrame:
-    """Wczytuje miesięczną historię kursu iShares MSCI ACWI ETF (ticker
-    `ACWI`, notowania skorygowane o dywidendy -- kolumna Adj Close z Yahoo
-    Finance) i zwraca miesięczne stopy zwrotu (kolumna `acwi_monthly_return`).
+    """Wczytuje miesięczną historię poziomu indeksu MSCI ACWI (USD, ok. 2500
+    spółek z rynków rozwiniętych i rozwijających się -- sam indeks, nie
+    konkretny fundusz go odwzorowujący) i zwraca miesięczne stopy zwrotu
+    (kolumna `acwi_monthly_return`).
 
-    W przeciwieństwie do pozostałych funkcji `fetch_*`/`load_*_manual`, ten
-    plik NIE pochodzi ani z automatycznego zapytania HTTP, ani z ręcznego
-    pobrania przez użytkownika, tylko z rzeczywistej sesji przeglądarki
-    (finance.yahoo.com/quote/ACWI/history, zakres "Max", interwał
-    "Monthly") -- każde inne wypróbowane źródło (Yahoo REST API, stooq,
-    nasdaq.com, macrotrends.net) było zablokowane lub niedostępne z tego
-    środowiska. Odświeżenie danych o kolejne miesiące wymaga powtórzenia
-    tej samej procedury (patrz README) -- traktuj ten plik jak zrzut
-    (snapshot), nie jak wynik powtarzalnego, automatycznego pobierania.
+    Pierwsza wersja tego modułu używała notowań ETF-u iShares MSCI ACWI
+    (ticker ACWI, dane od marca 2008 -- data powstania funduszu). Na
+    wyraźną prośbę zastąpiono to samym indeksem MSCI ACWI, którego historia
+    sięga grudnia 1987 r. (464 miesiące zamiast ~220) -- start w 2008 r.,
+    tuż przed globalnym kryzysem finansowym, sprawiał, że wynik symulacji
+    był nadmiernie wrażliwy na wybór akurat tego, szczególnie niekorzystnego
+    okresu jako punktu startowego. Dłuższa historia (obejmująca krach 1987,
+    bessę dot-com 2000-2002, kryzys 2008 i COVID-19 jako kolejne, a nie
+    jedyne trudne okresy) czyni wynik znacznie mniej podatnym na ten
+    konkretny błąd doboru próby.
+
+    Podobnie jak poprzednio, dane NIE pochodzą z automatycznego zapytania
+    HTTP tego modułu -- REST API dostawców danych giełdowych jest
+    zablokowane lub niedostępne z tego środowiska (patrz historia commitów).
+    Pochodzą z funkcji eksportu CSV wbudowanej w narzędzie do backtestingu
+    curvo.eu (curvo.eu/backtest/en/market-index/msci-acwi, waluta USD) --
+    to legalny, zamierzony sposób pobrania danych z tej strony (przycisk
+    "CSV" pod wykresem), nie obejście żadnego zabezpieczenia. Traktuj ten
+    plik jak zrzut (snapshot); odświeżenie o kolejne miesiące wymaga
+    ponownego pobrania z tego samego źródła.
     """
     if not path.exists():
         raise FileNotFoundError(
             f"Brak pliku {path}. Patrz README -- sekcja 'Dane historyczne' -- "
-            f"po sposób uzyskania historii ACWI (dane nie są pobierane "
+            f"po sposób uzyskania historii MSCI ACWI (dane nie są pobierane "
             f"automatycznie z tego środowiska)."
         )
     df = pd.read_csv(path)
     df["month"] = pd.PeriodIndex(df["month"], freq="M")
     df = df.set_index("month").sort_index()
-    returns = df["adj_close"].pct_change().to_frame(name="acwi_monthly_return")
+    returns = df["index_level"].pct_change().to_frame(name="acwi_monthly_return")
     return returns.dropna()
 
 
@@ -488,7 +505,7 @@ def build_processed_dataset(
     """Łączy wszystkie źródła we wspólny, miesięczny DataFrame i zapisuje go
     do `data/processed/market_data.csv`.
 
-    Noga akcyjna to globalny ETF (`load_acwi_history`, ACWI), nie
+    Noga akcyjna to globalny indeks MSCI ACWI (`load_acwi_history`), nie
     S&P 500 + WIG osobno. Noga obligacji to wyłącznie polskie detaliczne
     EDO (`build_edo_reference_rate_monthly`) -- bez globalnych obligacji
     (Damodaran/UST10Y) i bez TBSP.Index. Obie zmiany na wyraźną decyzję
@@ -497,9 +514,9 @@ def build_processed_dataset(
     Użyty jest outer join po indeksie miesięcznym: żadna seria nie jest po
     cichu ucinana do najkrótszej wspólnej historii. Decyzję, czy dany
     scenariusz symulacji wymaga kompletu kolumn (co w praktyce ogranicza
-    start symulacji do marca 2008 -- daty powstania ACWI, najpóźniejszej
-    ze wszystkich granic dolnych -- patrz docstring modułu), podejmuje
-    `simulation.py`, nie ten moduł.
+    start symulacji do 2002 r. -- zakresu NBP API, teraz jedynej wiążącej
+    granicy dolnej -- patrz docstring modułu), podejmuje `simulation.py`,
+    nie ten moduł.
     """
     cpi_annual = fetch_gus_cpi()
     wage_annual = fetch_gus_avg_wage()
