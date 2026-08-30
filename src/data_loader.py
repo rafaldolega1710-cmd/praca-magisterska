@@ -9,21 +9,40 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   portfel to wyłącznie akcje (ACWI) i polskie obligacje detaliczne (EDO).
   Funkcje `fetch_damodaran_returns`/`_parse_damodaran_xls` zostają dostępne
   i przetestowane na wypadek przyszłego porównania.
-- NBP API kursów średnich USD/PLN -- pobierany automatycznie, ale wyłącznie
-  od 2002-01-02 (twardy limit publicznego REST API, nie błąd zapytania).
-- GUS BDL API (CPI, przeciętne wynagrodzenie) -- pobierany automatycznie,
-  konkretne ID zmiennych zweryfikowane ręcznie (patrz stałe modułu niżej).
-- Globalny ETF akcyjny (iShares MSCI ACWI, ticker ACWI) -- ZASTĘPUJE
-  pierwotny podział "S&P 500 (Damodaran) + WIG" jedną globalną nogą akcyjną,
-  na wyraźną decyzję użytkownika (odejście od architektury opisanej w
-  sekcji 2/3.2 pracy). Dane historyczne uzyskane przez rzeczywistą sesję
-  przeglądarki na stronie Yahoo Finance -- nie istnieje tu skryptowalne
-  API: `query1/query2.finance.yahoo.com` blokuje zapytania z tego
-  środowiska ("Edge: Too Many Requests" nawet przy pierwszym zapytaniu),
-  `stooq.com` i `stooq.pl` chronione są wyzwaniem antybotowym, `nasdaq.com`
-  było nieosiągalne, a `macrotrends.net` zwrócił 403. Odświeżenie tych
-  danych w przyszłości wymaga powtórzenia tego samego, ręcznego/przez
-  przeglądarkę procesu -- patrz README, sekcja "Dane historyczne".
+- NBP kursów średnich USD/PLN -- pobierany automatycznie z dwóch źródeł:
+  żywego REST API dla 2002+ (twardy limit tego konkretnego API, nie błąd
+  zapytania) i rocznych plików archiwalnych `static.nbp.pl` dla 1995-2001
+  (zweryfikowano ręcznie: archiwum sięga dalej, do co najmniej 1985 r., ale
+  z innym układem kolumn przed 1995 r., nieobsługiwanym przez ten moduł).
+- GUS: CPI i przeciętne wynagrodzenie. Pierwsza wersja korzystała wyłącznie
+  z BDL API (2002/2003+, `fetch_gus_cpi`/`fetch_gus_avg_wage`, wciąż
+  dostępne), ale przy weryfikacji długości historii okazało się, że
+  1) `stat.gov.pl` publikuje w treści swoich stron gotowe tablice roczne
+  sięgające 1950 r. dla obu zmiennych, i 2) zmienna BDL użyta pierwotnie dla
+  wynagrodzenia to inna seria (raportowana na poziomie powiatu) niż ta,
+  do której faktycznie odwołuje się ustawa o IKE (art. 13a: limit liczony
+  od wynagrodzenia "w gospodarce narodowej") -- różnica realna, nie tylko
+  kosmetyczna (dla 2002 r.: 2239,56 zł w BDL vs 2133,21 zł w gospodarce
+  narodowej). `load_gus_cpi_history`/`load_gus_avg_wage_history` (dane od
+  1950 r., wynagrodzenie sprzed denominacji 1995 r. przeliczone /10 000)
+  zastępują te dwie funkcje w `build_processed_dataset` -- i poprawność,
+  i dłuższa historia, nie tylko jedno z nich.
+- Globalny indeks akcyjny (MSCI ACWI Index, ok. 2500 spółek z rynków
+  rozwiniętych i rozwijających się) -- ZASTĘPUJE pierwotny podział
+  "S&P 500 (Damodaran) + WIG" jedną globalną nogą akcyjną, na wyraźną
+  decyzję użytkownika (odejście od architektury opisanej w sekcji 2/3.2
+  pracy). Pierwsza wersja używała notowań ETF-u iShares MSCI ACWI
+  (od marca 2008), ale start tuż przed kryzysem 2008 nadmiernie obciążał
+  wynik -- zastąpiono to samym indeksem (nie konkretnym funduszem), którego
+  historia sięga grudnia 1987 r. (464 miesiące, obejmujące krach 1987,
+  bessę dot-com, kryzys 2008 i COVID jako kolejne, nie jedyne trudne
+  okresy). Dane pochodzą z wbudowanej funkcji eksportu CSV serwisu
+  curvo.eu (curvo.eu/backtest/en/market-index/msci-acwi) -- REST API
+  dostawców danych giełdowych (`query1/query2.finance.yahoo.com`,
+  `stooq.com`/`stooq.pl`, `nasdaq.com`, `macrotrends.net`) było
+  zablokowane lub niedostępne z tego środowiska. Odświeżenie tych danych
+  w przyszłości wymaga powtórzenia tego samego pobrania -- patrz README,
+  sekcja "Dane historyczne".
 - WIG i TBSP.Index -- BRAK automatycznego pobierania: typowe źródło
   (stooq.pl) jest chronione wyzwaniem antybotowym (JS proof-of-work), którego
   celowo nie obchodzę. `load_wig_manual`/`load_tbsp_manual` wczytują plik
@@ -41,19 +60,32 @@ Zweryfikowana (nie zakładana) dostępność źródeł -- patrz plan Etapu 2:
   (przed EDO -- do września 2013 -- lub między wrześniem 2013 a grudniem
   2016), stosowana jest zastępcza formuła `stopa_referencyjna_NBP + 2%`,
   zgodnie z instrukcją użytkownika -- stopa referencyjna NBP pochodzi z
-  oficjalnego, w pełni maszynowego archiwum `static.nbp.pl` (1998+, bez
-  zabezpieczeń antybotowych).
+  oficjalnego, w pełni maszynowego archiwum `static.nbp.pl`, bez
+  zabezpieczeń antybotowych. Zaczyna się 6.02.1998 -- to NIE jest luka
+  w danych, tylko fakt instytucjonalny: stopa referencyjna jako
+  narzędzie polityki pieniężnej została ustanowiona dopiero wtedy, gdy
+  na mocy ustawy o NBP z 1997 r. powstała Rada Polityki Pieniężnej
+  (zweryfikowano). Ten instrument po prostu nie istniał wcześniej --
+  to twardy, uzasadniony ekonomicznie/instytucjonalnie dolny limit,
+  nie coś do dalszego wydłużania.
 
-Konsekwencja metodologiczna: pełna symulacja obejmująca WSZYSTKIE klasy
-aktywów (w tym część zagraniczną przeliczaną na PLN) jest możliwa dopiero
-od 2002 r. (zakres NBP API), a globalna noga akcyjna (ACWI) dodatkowo
-zawęża to do marca 2008 r. (data powstania funduszu) -- krótsza historia
-niż dawałby S&P 500 (od 1928 r.), ale za to jeden, spójny, faktycznie
-inwestowalny instrument zamiast dwóch osobnych indeksów.
+Konsekwencja metodologiczna: po wydłużeniu kursu NBP (do 1995 r.) i danych
+GUS (do 1950 r.), **jedynym wiążącym ograniczeniem dolnym pełnej symulacji
+pozostaje stopa referencyjna NBP, od 6 lutego 1998 r.** -- używana we
+wzorze zastępczym dla EDO tam, gdzie marża tej obligacji jest nieznana.
+W przeciwieństwie do wcześniejszych ograniczeń (zakres API, brak
+digitalizacji starszych danych), to nie jest luka techniczna: stopa
+referencyjna jako narzędzie polityki pieniężnej po prostu nie istniała
+przed powstaniem Rady Polityki Pieniężnej w 1998 r. -- twardy,
+uzasadniony instytucjonalnie limit, nie coś do dalszego wydłużania.
+Indeks MSCI ACWI (1987+), kurs NBP (1995+) i dane GUS (1950+) same w sobie
+sięgają dalej.
 """
 
 from __future__ import annotations
 
+import datetime as dt
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -69,6 +101,18 @@ DAMODARAN_HEADER_ROW = 19  # zweryfikowane ręcznie na pobranym pliku (0-indekso
 
 NBP_API_BASE = "https://api.nbp.pl/api/exchangerates/rates/A/USD"
 NBP_API_MIN_YEAR = 2002  # zweryfikowane: zapytania o wcześniejsze lata zwracają 404
+
+# Dla lat sprzed 2002 (poza zakresem żywego REST API) NBP publikuje osobne,
+# roczne pliki archiwalne (tabela A) pod static.nbp.pl -- bez zabezpieczeń
+# antybotowych, zweryfikowane ręcznie wstecz aż do 1985 r. Archiwum ma jednak
+# inny układ kolumn przed 1995 r. (dane tygodniowe, kolumny wg nazw krajów
+# w kolejności alfabetycznej, nie kod waluty) -- zamiast dorabiać osobny
+# parser dla tego układu, granica dolna ustawiona jest na 1995 r., gdzie
+# układ jest już spójny z kolejnymi latami (jedna różnica: nagłówek "100 USD"
+# zamiast "1 USD" w 1995 r. -- obsłużone przez wykrywanie mnożnika w parserze).
+NBP_ARCHIVE_URL = "https://static.nbp.pl/dane/kursy/Archiwum/archiwum_tab_a_{year}.xls"
+NBP_ARCHIVE_MIN_YEAR = 1995
+NBP_ARCHIVE_DIR = RAW_DIR / "nbp_archive"
 
 # ID zmiennych GUS BDL API, zweryfikowane ręcznie przez przeglądanie hierarchii
 # /api/v1/subjects (K15 "CENY" -> G405 "WSKAŹNIKI CEN" -> P2955, oraz
@@ -178,8 +222,72 @@ def _fetch_nbp_year(year: int) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["date", "usd_pln"])
 
 
+def _download_nbp_archive_year(year: int, cache_path: Path) -> None:
+    """Pobiera surowy roczny plik archiwum NBP (tabela A) i zapisuje go bez
+    modyfikacji -- wydzielone z parsowania (`_parse_nbp_archive_year`), tak
+    samo jak przy Damodaranie, żeby parsowanie dało się testować bez sieci."""
+    response = requests.get(NBP_ARCHIVE_URL.format(year=year), timeout=30)
+    response.raise_for_status()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(response.content)
+
+
+def _parse_nbp_archive_year(path: Path) -> pd.DataFrame:
+    """Parsuje jeden roczny plik archiwum NBP (1995+, tabela A) i zwraca
+    dzienne kursy średnie USD/PLN (kolumny `date`, `usd_pln`).
+
+    Układ kolumn jest w tych plikach spójny od 1995 r. co do kolumny USD
+    (nagłówek "1 USD", a w 1995 r. wyjątkowo "100 USD"), ale kolumna daty
+    NIE zawsze ma własny nagłówek tekstowy: część lat (np. 2000) w ogóle
+    nie ma osobnej etykiety "Data" -- daty zaczynają się od razu pod
+    nagłówkiem "KURS ŚREDNI" w pierwszej kolumnie. Zamiast więc szukać
+    tekstowej etykiety kolumny daty, ustalamy ją jako pierwszą kolumnę,
+    w której wiersz *pod* nagłówkiem zawiera rzeczywistą datę.
+    """
+    raw = pd.read_excel(path, sheet_name=0, header=None)
+    header_row, usd_col, multiplier = None, None, 1.0
+    for i in range(min(5, len(raw))):
+        for j, val in enumerate(raw.iloc[i]):
+            if not isinstance(val, str):
+                continue
+            m = re.match(r"(\d+)\s*usd", val.strip().lower())
+            if m:
+                header_row, usd_col, multiplier = i, j, float(m.group(1))
+        if usd_col is not None:
+            break
+
+    if usd_col is None:
+        raise ValueError(f"Nie znaleziono kolumny USD w pliku archiwum NBP: {path}")
+
+    first_data_row = raw.iloc[header_row + 1]
+    date_col = next(
+        (j for j, val in enumerate(first_data_row) if isinstance(val, (pd.Timestamp, dt.datetime))),
+        None,
+    )
+    if date_col is None:
+        raise ValueError(f"Nie znaleziono kolumny daty w pliku archiwum NBP: {path}")
+
+    data = raw.iloc[header_row + 1 :, [date_col, usd_col]].copy()
+    data.columns = ["date", "usd_pln"]
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data["usd_pln"] = pd.to_numeric(data["usd_pln"], errors="coerce") / multiplier
+    return data.dropna(subset=["date", "usd_pln"])
+
+
+def _fetch_nbp_daily_for_year(year: int) -> pd.DataFrame:
+    """Zwraca dzienne kursy USD/PLN dla jednego roku, z właściwego źródła:
+    żywego REST API dla lat >= `NBP_API_MIN_YEAR` (2002+), archiwalnego
+    pliku rocznego dla wcześniejszych (od `NBP_ARCHIVE_MIN_YEAR`, 1995+)."""
+    if year >= NBP_API_MIN_YEAR:
+        return _fetch_nbp_year(year)
+    cache_path = NBP_ARCHIVE_DIR / f"archiwum_tab_a_{year}.xls"
+    if not cache_path.exists():
+        _download_nbp_archive_year(year, cache_path)
+    return _parse_nbp_archive_year(cache_path)
+
+
 def fetch_nbp_usdpln_monthly(
-    start_year: int = NBP_API_MIN_YEAR,
+    start_year: int = NBP_ARCHIVE_MIN_YEAR,
     end_year: int | None = None,
     cache_path: Path = RAW_DIR / "nbp_usdpln.csv",
     force_refresh: bool = False,
@@ -188,15 +296,18 @@ def fetch_nbp_usdpln_monthly(
     (ostatnia notowana wartość każdego miesiąca) od `start_year` do
     `end_year` (domyślnie do roku bieżącego).
 
-    `start_year` poniżej 2002 jest odrzucane jawnym `ValueError` --
-    zweryfikowano ręcznie, że publiczne REST API NBP (`api.nbp.pl`) po
-    prostu nie ma wcześniejszych danych (zwraca 404), więc lepiej to
-    zasygnalizować jawnie niż dać cichy, mylący wynik.
+    Lata >= 2002 pochodzą z żywego REST API NBP (`api.nbp.pl`), lata
+    1995-2001 z rocznych plików archiwalnych (`static.nbp.pl`) --
+    `_fetch_nbp_daily_for_year` dobiera właściwe źródło automatycznie.
+    `start_year` poniżej 1995 jest odrzucane jawnym `ValueError`: archiwum
+    NBP sięga wprawdzie dalej (zweryfikowano ręcznie do 1985 r.), ale ma
+    tam inny układ kolumn (dane tygodniowe wg nazw krajów), którego ten
+    moduł nie parsuje -- patrz komentarz przy stałych modułu.
     """
-    if start_year < NBP_API_MIN_YEAR:
+    if start_year < NBP_ARCHIVE_MIN_YEAR:
         raise ValueError(
-            f"NBP API (api.nbp.pl) udostępnia dane dopiero od {NBP_API_MIN_YEAR} r. "
-            f"(zweryfikowano ręcznie -- wcześniejsze zapytania zwracają 404). "
+            f"Ten moduł obsługuje dane NBP dopiero od {NBP_ARCHIVE_MIN_YEAR} r. "
+            f"(wcześniejsze archiwum ma inny, nieobsługiwany układ kolumn). "
             f"Podano start_year={start_year}."
         )
     end_year = end_year or pd.Timestamp.today().year
@@ -205,7 +316,7 @@ def fetch_nbp_usdpln_monthly(
         daily = pd.read_csv(cache_path, parse_dates=["date"])
     else:
         daily = pd.concat(
-            [_fetch_nbp_year(y) for y in range(start_year, end_year + 1)],
+            [_fetch_nbp_daily_for_year(y) for y in range(start_year, end_year + 1)],
             ignore_index=True,
         )
         daily["date"] = pd.to_datetime(daily["date"])
@@ -248,10 +359,16 @@ def fetch_gus_series(variable_id: int, cache_path: Path, force_refresh: bool = F
 
 
 def fetch_gus_cpi(cache_path: Path = RAW_DIR / "gus_cpi.csv", force_refresh: bool = False) -> pd.DataFrame:
-    """Roczny wskaźnik cen towarów i usług konsumpcyjnych GUS, w konwencji
-    "rok poprzedni = 100" (np. 114.4 oznacza inflację +14,4% w danym roku
-    -- tak jak w 2022 r.). Żeby uzyskać stopę inflacji jako ułamek, odejmij
-    100 i podziel przez 100: `(value - 100) / 100`.
+    """Roczny wskaźnik cen towarów i usług konsumpcyjnych GUS (BDL API,
+    2003+), w konwencji "rok poprzedni = 100" (np. 114.4 oznacza inflację
+    +14,4% w danym roku -- tak jak w 2022 r.). Żeby uzyskać stopę inflacji
+    jako ułamek, odejmij 100 i podziel przez 100: `(value - 100) / 100`.
+
+    Zastąpiona w `build_processed_dataset` przez `load_gus_cpi_history`
+    (dłuższa historia, od 1950 r.) -- ta funkcja zostaje dostępna i
+    przetestowana jako alternatywne, żywe źródło (przydatne, gdyby
+    zależało na najnowszym roku szybciej niż aktualizowana jest ręcznie
+    odświeżana tablica długiej historii).
     """
     df = fetch_gus_series(GUS_CPI_VARIABLE_ID, cache_path, force_refresh)
     return df.rename(columns={"value": "cpi_prev_year_100"})
@@ -260,11 +377,65 @@ def fetch_gus_cpi(cache_path: Path = RAW_DIR / "gus_cpi.csv", force_refresh: boo
 def fetch_gus_avg_wage(
     cache_path: Path = RAW_DIR / "gus_avg_wage.csv", force_refresh: bool = False
 ) -> pd.DataFrame:
-    """Roczne przeciętne miesięczne wynagrodzenie brutto w gospodarce
-    narodowej (zł) -- podstawa przeliczania limitów IKE/IKZE/OKI
-    (`tax_engine.annual_limit`, podrozdz. 3.3)."""
+    """Roczne przeciętne miesięczne wynagrodzenie brutto (BDL API, 2002+).
+
+    UWAGA METODOLOGICZNA: ta zmienna BDL (`Przeciętne miesięczne
+    wynagrodzenia brutto`, raportowana na poziomie powiatu) okazała się przy
+    weryfikacji INNĄ serią niż ta, do której faktycznie odwołuje się ustawa
+    o IKE (art. 13a: limit = wielokrotność "przeciętnego prognozowanego
+    wynagrodzenia miesięcznego **w gospodarce narodowej**" z ustawy
+    budżetowej) -- dla 2002 r. ta funkcja zwraca 2239,56 zł, podczas gdy
+    oficjalna seria "w gospodarce narodowej" (patrz `load_gus_avg_wage_history`)
+    podaje 2133,21 zł. Zastąpiona w `build_processed_dataset` przez
+    `load_gus_avg_wage_history` z tego właśnie powodu -- zostaje dostępna
+    i przetestowana, ale NIE jako źródło do liczenia limitów IKE/IKZE/OKI.
+    """
     df = fetch_gus_series(GUS_AVG_WAGE_VARIABLE_ID, cache_path, force_refresh)
     return df.rename(columns={"value": "avg_gross_wage_pln"})
+
+
+def load_gus_cpi_history(path: Path = RAW_DIR / "gus_cpi_1950.csv") -> pd.DataFrame:
+    """Roczny wskaźnik cen towarów i usług konsumpcyjnych GUS od 1950 r.,
+    w tej samej konwencji co `fetch_gus_cpi` ("rok poprzedni = 100") --
+    wartości dla lat 2002+ pokrywają się dokładnie z BDL API (zweryfikowano
+    ręcznie, np. 2022: 114,4 w obu źródłach), więc to czysto wydłużenie
+    historii, nie zmiana metodologii.
+
+    Źródło: `stat.gov.pl` -- strona "Roczne wskaźniki cen towarów i usług
+    konsumpcyjnych od 1950 r." udostępnia gotowy plik CSV do pobrania
+    (link na stronie, nie ukryte API) -- pobrany i zapisany jako zrzut,
+    analogicznie do `load_acwi_history`.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Brak pliku {path}. Źródło: stat.gov.pl, sekcja Ceny/Wskaźniki cen, "
+            f"'Roczne wskaźniki cen towarów i usług konsumpcyjnych od 1950 r.'"
+        )
+    return pd.read_csv(path, index_col="year")
+
+
+def load_gus_avg_wage_history(path: Path = RAW_DIR / "gus_avg_wage_1950.csv") -> pd.DataFrame:
+    """Roczne przeciętne miesięczne wynagrodzenie **w gospodarce narodowej**
+    (zł) od 1950 r. -- to jest właściwa, ustawowo wskazana podstawa
+    przeliczania limitów IKE/IKZE/OKI (`tax_engine.annual_limit`, podrozdz.
+    3.3; art. 13a ustawy o IKE mówi wprost o wynagrodzeniu "w gospodarce
+    narodowej", nie w "sektorze przedsiębiorstw" -- patrz uwaga w
+    `fetch_gus_avg_wage`).
+
+    Źródło: `stat.gov.pl`, strona "Przeciętne miesięczne wynagrodzenie w
+    gospodarce narodowej w latach 1950-2025" -- tabela w treści strony
+    (bez osobnego eksportu CSV/XLSX dla tej konkretnej tablicy), przepisana
+    ręcznie z widocznej treści strony i zapisana jako zrzut. Wartości sprzed
+    1995 r. są w oryginale w starych złotych (PLZ, sprzed denominacji
+    1995-01-01) -- przeliczone tu na nowe złote (/10 000) dla spójności
+    z resztą modelu.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Brak pliku {path}. Źródło: stat.gov.pl, sekcja Rynek pracy, "
+            f"'Przeciętne miesięczne wynagrodzenie w gospodarce narodowej w latach 1950-2025'."
+        )
+    return pd.read_csv(path, index_col="year")
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +510,7 @@ def build_edo_reference_rate_monthly(
     `stopa_referencyjna_NBP + RETAIL_BOND_FALLBACK_MARGIN` (2 p.p., zgodnie
     z aktualną marżą EDO).
     """
-    cpi_annual = fetch_gus_cpi()
+    cpi_annual = load_gus_cpi_history()
     margins = load_edo_margins(edo_margins_path)
     nbp_rates = fetch_nbp_reference_rate(nbp_reference_path)
 
@@ -432,34 +603,46 @@ def load_tbsp_manual(path: Path = RAW_DIR / "tbsp.csv") -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Globalny ETF akcyjny (iShares MSCI ACWI) -- zastępuje S&P 500 + WIG
+# Globalny indeks akcyjny (MSCI ACWI Index) -- zastępuje S&P 500 + WIG
 # ---------------------------------------------------------------------------
 
 def load_acwi_history(path: Path = RAW_DIR / "acwi_monthly.csv") -> pd.DataFrame:
-    """Wczytuje miesięczną historię kursu iShares MSCI ACWI ETF (ticker
-    `ACWI`, notowania skorygowane o dywidendy -- kolumna Adj Close z Yahoo
-    Finance) i zwraca miesięczne stopy zwrotu (kolumna `acwi_monthly_return`).
+    """Wczytuje miesięczną historię poziomu indeksu MSCI ACWI (USD, ok. 2500
+    spółek z rynków rozwiniętych i rozwijających się -- sam indeks, nie
+    konkretny fundusz go odwzorowujący) i zwraca miesięczne stopy zwrotu
+    (kolumna `acwi_monthly_return`).
 
-    W przeciwieństwie do pozostałych funkcji `fetch_*`/`load_*_manual`, ten
-    plik NIE pochodzi ani z automatycznego zapytania HTTP, ani z ręcznego
-    pobrania przez użytkownika, tylko z rzeczywistej sesji przeglądarki
-    (finance.yahoo.com/quote/ACWI/history, zakres "Max", interwał
-    "Monthly") -- każde inne wypróbowane źródło (Yahoo REST API, stooq,
-    nasdaq.com, macrotrends.net) było zablokowane lub niedostępne z tego
-    środowiska. Odświeżenie danych o kolejne miesiące wymaga powtórzenia
-    tej samej procedury (patrz README) -- traktuj ten plik jak zrzut
-    (snapshot), nie jak wynik powtarzalnego, automatycznego pobierania.
+    Pierwsza wersja tego modułu używała notowań ETF-u iShares MSCI ACWI
+    (ticker ACWI, dane od marca 2008 -- data powstania funduszu). Na
+    wyraźną prośbę zastąpiono to samym indeksem MSCI ACWI, którego historia
+    sięga grudnia 1987 r. (464 miesiące zamiast ~220) -- start w 2008 r.,
+    tuż przed globalnym kryzysem finansowym, sprawiał, że wynik symulacji
+    był nadmiernie wrażliwy na wybór akurat tego, szczególnie niekorzystnego
+    okresu jako punktu startowego. Dłuższa historia (obejmująca krach 1987,
+    bessę dot-com 2000-2002, kryzys 2008 i COVID-19 jako kolejne, a nie
+    jedyne trudne okresy) czyni wynik znacznie mniej podatnym na ten
+    konkretny błąd doboru próby.
+
+    Podobnie jak poprzednio, dane NIE pochodzą z automatycznego zapytania
+    HTTP tego modułu -- REST API dostawców danych giełdowych jest
+    zablokowane lub niedostępne z tego środowiska (patrz historia commitów).
+    Pochodzą z funkcji eksportu CSV wbudowanej w narzędzie do backtestingu
+    curvo.eu (curvo.eu/backtest/en/market-index/msci-acwi, waluta USD) --
+    to legalny, zamierzony sposób pobrania danych z tej strony (przycisk
+    "CSV" pod wykresem), nie obejście żadnego zabezpieczenia. Traktuj ten
+    plik jak zrzut (snapshot); odświeżenie o kolejne miesiące wymaga
+    ponownego pobrania z tego samego źródła.
     """
     if not path.exists():
         raise FileNotFoundError(
             f"Brak pliku {path}. Patrz README -- sekcja 'Dane historyczne' -- "
-            f"po sposób uzyskania historii ACWI (dane nie są pobierane "
+            f"po sposób uzyskania historii MSCI ACWI (dane nie są pobierane "
             f"automatycznie z tego środowiska)."
         )
     df = pd.read_csv(path)
     df["month"] = pd.PeriodIndex(df["month"], freq="M")
     df = df.set_index("month").sort_index()
-    returns = df["adj_close"].pct_change().to_frame(name="acwi_monthly_return")
+    returns = df["index_level"].pct_change().to_frame(name="acwi_monthly_return")
     return returns.dropna()
 
 
@@ -488,7 +671,7 @@ def build_processed_dataset(
     """Łączy wszystkie źródła we wspólny, miesięczny DataFrame i zapisuje go
     do `data/processed/market_data.csv`.
 
-    Noga akcyjna to globalny ETF (`load_acwi_history`, ACWI), nie
+    Noga akcyjna to globalny indeks MSCI ACWI (`load_acwi_history`), nie
     S&P 500 + WIG osobno. Noga obligacji to wyłącznie polskie detaliczne
     EDO (`build_edo_reference_rate_monthly`) -- bez globalnych obligacji
     (Damodaran/UST10Y) i bez TBSP.Index. Obie zmiany na wyraźną decyzję
@@ -497,12 +680,13 @@ def build_processed_dataset(
     Użyty jest outer join po indeksie miesięcznym: żadna seria nie jest po
     cichu ucinana do najkrótszej wspólnej historii. Decyzję, czy dany
     scenariusz symulacji wymaga kompletu kolumn (co w praktyce ogranicza
-    start symulacji do marca 2008 -- daty powstania ACWI, najpóźniejszej
-    ze wszystkich granic dolnych -- patrz docstring modułu), podejmuje
-    `simulation.py`, nie ten moduł.
+    start symulacji do 6 lutego 1998 r. -- daty ustanowienia stopy
+    referencyjnej NBP, jedynego pozostałego ograniczenia dolnego, i to
+    instytucjonalnego, nie technicznego -- patrz docstring modułu),
+    podejmuje `simulation.py`, nie ten moduł.
     """
-    cpi_annual = fetch_gus_cpi()
-    wage_annual = fetch_gus_avg_wage()
+    cpi_annual = load_gus_cpi_history()
+    wage_annual = load_gus_avg_wage_history()
     usdpln_monthly = fetch_nbp_usdpln_monthly()
     acwi_monthly = load_acwi_history(acwi_path)
     edo_monthly = build_edo_reference_rate_monthly()

@@ -14,8 +14,10 @@ import pandas as pd
 import pytest
 
 from src.data_loader import (
+    _fetch_nbp_daily_for_year,
     _nbp_reference_rate_at,
     _parse_damodaran_xls,
+    _parse_nbp_archive_year,
     _parse_price_series_to_monthly_returns,
     annualize_to_monthly,
     build_edo_reference_rate_monthly,
@@ -24,6 +26,8 @@ from src.data_loader import (
     fetch_nbp_usdpln_monthly,
     load_acwi_history,
     load_edo_margins,
+    load_gus_avg_wage_history,
+    load_gus_cpi_history,
 )
 
 
@@ -79,9 +83,9 @@ class TestParseDamodaranXls:
 
 
 class TestFetchNbpUsdplnMonthly:
-    def test_rejects_start_year_before_api_range(self):
-        with pytest.raises(ValueError, match="2002"):
-            fetch_nbp_usdpln_monthly(start_year=1995)
+    def test_rejects_start_year_before_archive_range(self):
+        with pytest.raises(ValueError, match="1995"):
+            fetch_nbp_usdpln_monthly(start_year=1990)
 
     def test_resamples_daily_rates_to_monthly_last(self, tmp_path):
         cache_path = tmp_path / "nbp_usdpln.csv"
@@ -135,6 +139,112 @@ class TestFetchNbpUsdplnMonthly:
             mock_get.assert_not_called()
 
         assert result.loc[pd.Period("2002-01", freq="M"), "usd_pln"] == pytest.approx(4.10)
+
+
+class TestParseNbpArchiveYear:
+    def _make_fixture(self, tmp_path, header_row, usd_header, rows):
+        path = tmp_path / "archiwum_tab_a_test.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for _ in range(header_row):
+            ws.append([None])
+        ws.append(["Nr / No.", "Data / Date", usd_header, "1 DEM"])
+        for row in rows:
+            ws.append(row)
+        wb.save(path)
+        return path
+
+    def test_parses_1_usd_header_format(self, tmp_path):
+        # uklad z lat 1996+
+        path = self._make_fixture(
+            tmp_path,
+            header_row=1,
+            usd_header="1 USD",
+            rows=[
+                [1, pd.Timestamp("1998-01-02"), 3.525, 1.956],
+                [2, pd.Timestamp("1998-01-05"), 3.5275, 1.946],
+            ],
+        )
+        df = _parse_nbp_archive_year(path)
+        assert list(df["usd_pln"]) == pytest.approx([3.525, 3.5275])
+
+    def test_parses_100_usd_header_format_and_divides_by_100(self, tmp_path):
+        # uklad specyficzny dla 1995 r. -- kurs podany za 100 USD
+        path = self._make_fixture(
+            tmp_path,
+            header_row=1,
+            usd_header="100 USD",
+            rows=[
+                [1, pd.Timestamp("1995-01-02"), 243.01, 156.9],
+                [2, pd.Timestamp("1995-01-03"), 243.64, 156.66],
+            ],
+        )
+        df = _parse_nbp_archive_year(path)
+        assert list(df["usd_pln"]) == pytest.approx([2.4301, 2.4364])
+
+    def test_missing_usd_column_raises(self, tmp_path):
+        path = tmp_path / "bad.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Nr", "Data / Date", "1 EUR"])
+        ws.append([1, pd.Timestamp("2000-01-01"), 4.0])
+        wb.save(path)
+        with pytest.raises(ValueError):
+            _parse_nbp_archive_year(path)
+
+
+class TestFetchNbpDailyForYear:
+    def test_pre_2002_year_uses_archive_not_live_api(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("src.data_loader.NBP_ARCHIVE_DIR", tmp_path)
+        fake_df = pd.DataFrame({"date": [pd.Timestamp("1999-01-04")], "usd_pln": [3.5]})
+
+        with patch("src.data_loader._download_nbp_archive_year") as mock_download, \
+             patch("src.data_loader._parse_nbp_archive_year", return_value=fake_df) as mock_parse, \
+             patch("src.data_loader.requests.get") as mock_get:
+            result = _fetch_nbp_daily_for_year(1999)
+            mock_download.assert_called_once()
+            mock_parse.assert_called_once()
+            mock_get.assert_not_called()
+
+        assert result.equals(fake_df)
+
+    def test_2002_and_later_uses_live_api_not_archive(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"rates": [{"effectiveDate": "2002-01-02", "mid": 4.0}]}
+
+        with patch("src.data_loader.requests.get", return_value=mock_response) as mock_get, \
+             patch("src.data_loader._download_nbp_archive_year") as mock_download:
+            _fetch_nbp_daily_for_year(2002)
+            mock_get.assert_called_once()
+            mock_download.assert_not_called()
+
+
+class TestLoadGusHistory:
+    def test_load_gus_cpi_history_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_gus_cpi_history(tmp_path / "missing.csv")
+
+    def test_load_gus_cpi_history_reads_indexed_by_year(self, tmp_path):
+        path = tmp_path / "cpi.csv"
+        path.write_text("year,cpi_prev_year_100\n2022,114.4\n2023,111.4\n", encoding="utf-8")
+        df = load_gus_cpi_history(path)
+        assert df.loc[2022, "cpi_prev_year_100"] == pytest.approx(114.4)
+
+    def test_load_gus_avg_wage_history_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_gus_avg_wage_history(tmp_path / "missing.csv")
+
+    def test_load_gus_avg_wage_history_reads_indexed_by_year(self, tmp_path):
+        path = tmp_path / "wage.csv"
+        path.write_text(
+            "year,avg_gross_wage_pln\n1994,532.80\n1995,702.62\n", encoding="utf-8"
+        )
+        df = load_gus_avg_wage_history(path)
+        # sanity: brak skoku na granicy denominacji 1995 r. (wartosci juz przeliczone
+        # w pliku zrodlowym, ta funkcja tylko wczytuje -- test pilnuje formatu, nie przeliczenia)
+        assert df.loc[1994, "avg_gross_wage_pln"] == pytest.approx(532.80)
+        assert df.loc[1995, "avg_gross_wage_pln"] == pytest.approx(702.62)
 
 
 class TestFetchGusSeries:
@@ -219,10 +329,10 @@ class TestLoadAcwiHistory:
         with pytest.raises(FileNotFoundError, match="README"):
             load_acwi_history(missing)
 
-    def test_computes_monthly_returns_from_adj_close(self, tmp_path):
+    def test_computes_monthly_returns_from_index_level(self, tmp_path):
         path = tmp_path / "acwi_monthly.csv"
         path.write_text(
-            "month,adj_close\n2020-01,100.0\n2020-02,110.0\n2020-03,99.0\n",
+            "month,index_level\n2020-01,100.0\n2020-02,110.0\n2020-03,99.0\n",
             encoding="utf-8",
         )
         result = load_acwi_history(path)
@@ -297,7 +407,7 @@ class TestBuildEdoReferenceRateMonthly:
         nbp_path.write_text("effective_from,reference_rate_pct\n1998-01-01,10.0\n", encoding="utf-8")
 
         fake_cpi = pd.DataFrame({"cpi_prev_year_100": [103.4]}, index=pd.Index([2020], name="year"))
-        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+        with patch("src.data_loader.load_gus_cpi_history", return_value=fake_cpi):
             result = build_edo_reference_rate_monthly(margins_path, nbp_path)
 
         # inflacja 2020 = 3.4%, marza 1.5% -> stopa roczna 4.9%, przeliczona na miesieczna
@@ -319,7 +429,7 @@ class TestBuildEdoReferenceRateMonthly:
         )
 
         fake_cpi = pd.DataFrame({"cpi_prev_year_100": [100.0]}, index=pd.Index([2015], name="year"))
-        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+        with patch("src.data_loader.load_gus_cpi_history", return_value=fake_cpi):
             result = build_edo_reference_rate_monthly(margins_path, nbp_path)
 
         # stopa ref. NBP 1.5% + fallback marzy 2% = 3.5% rocznie
@@ -340,7 +450,7 @@ class TestBuildEdoReferenceRateMonthly:
         nbp_path.write_text("effective_from,reference_rate_pct\n2025-01-01,4.00\n", encoding="utf-8")
 
         fake_cpi = pd.DataFrame({"cpi_prev_year_100": [103.6]}, index=pd.Index([2025], name="year"))
-        with patch("src.data_loader.fetch_gus_cpi", return_value=fake_cpi):
+        with patch("src.data_loader.load_gus_cpi_history", return_value=fake_cpi):
             result = build_edo_reference_rate_monthly(margins_path, nbp_path)
 
         expected_monthly = annualize_to_monthly(0.04 + 0.02)
