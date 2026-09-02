@@ -57,6 +57,7 @@ def make_archetype(**overrides) -> Archetype:
         marginal_tax_rate=0.12,
         ppk_eligible=False,
         household_multiplier=1,
+        start_age=30,
     )
     defaults.update(overrides)
     return Archetype(**defaults)

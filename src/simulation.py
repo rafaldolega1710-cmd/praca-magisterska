@@ -75,6 +75,8 @@ class Archetype:
     marginal_tax_rate: float  # do obliczenia zwrotu podatku z ulgi IKZE (nie do wyboru kolejności kaskady -- ta jest stała)
     ppk_eligible: bool
     household_multiplier: int  # 1 = jedna osoba, 2 = oboje rodzice (podwójne roczne limity IKE/IKZE/PPK)
+    start_age: int  # wiek na poczatku symulacji -- warunkuje, ile ma lat w chwili osiagniecia FIRE,
+    # co z kolei rozstrzyga o dostepnosci IKE/IKZE/PPK bez kary w fazie dekumulacji (patrz decumulation.py)
 
 
 def _empty_account() -> dict[str, float]:
@@ -407,18 +409,37 @@ def run_simulation(
             target_at_fire = target
 
     ledger = pd.DataFrame(rows).set_index("month")
+    years_to_fire = (fire_month - data.index[0]).n / 12.0 if fire_month is not None else None
+    age_at_fire = archetype.start_age + years_to_fire if years_to_fire is not None else None
+
+    account_split_at_fire = None
+    portfolio_value_at_fire = None
+    if fire_month is not None:
+        fire_row = ledger.loc[fire_month]
+        portfolio_value_at_fire = float(fire_row["portfolio_value"])
+        account_split_at_fire = (
+            {
+                acct: float(fire_row[acct]) / portfolio_value_at_fire
+                for acct in ("ppk", "ikze", "ike", "oki", "standard")
+            }
+            if portfolio_value_at_fire > 0
+            else None
+        )
+
     summary = {
         "archetype": archetype.name,
         "enabled_accounts": ",".join(sorted(enabled_accounts)) if enabled_accounts else "none",
         "equity_weight": assumptions.equity_weight,
         "fire_reached": fire_month is not None,
         "fire_month": str(fire_month) if fire_month is not None else None,
-        "years_to_fire": (
-            (fire_month - data.index[0]).n / 12.0 if fire_month is not None else None
-        ),
+        "years_to_fire": years_to_fire,
+        "start_age": archetype.start_age,
+        "age_at_fire": age_at_fire,
         "final_portfolio_value": ledger["portfolio_value"].iloc[-1],
         "target_at_end": ledger["target"].iloc[-1],
         "target_at_fire": target_at_fire,
+        "portfolio_value_at_fire": portfolio_value_at_fire,
+        "account_split_at_fire": account_split_at_fire,
         "cumulative_dividend_tax": ledger["dividend_tax"].sum(),
         "cumulative_rebalancing_tax": ledger["rebalancing_tax"].sum(),
     }
@@ -468,25 +489,41 @@ def run_rolling_accumulation(
     start_months = _clean_market_data(market_data).index[::step_months]
 
     years_to_fire: list[float] = []
+    portfolio_at_fire: list[float] = []
+    ages_at_fire: list[float] = []
     for start in start_months:
         _, summary = run_simulation(
             archetype, market_data, enabled_accounts, assumptions, oki_kind, start_month=start
         )
         if summary["fire_reached"]:
             years_to_fire.append(summary["years_to_fire"])
+            portfolio_at_fire.append(summary["portfolio_value_at_fire"])
+            ages_at_fire.append(summary["age_at_fire"])
 
     total_windows = len(start_months)
     reached = len(years_to_fire)
     years_series = pd.Series(years_to_fire, dtype=float)
+    portfolio_series = pd.Series(portfolio_at_fire, dtype=float)
+    age_series = pd.Series(ages_at_fire, dtype=float)
 
     return {
         "archetype": archetype.name,
         "enabled_accounts": ",".join(sorted(enabled_accounts)) if enabled_accounts else "none",
         "equity_weight": assumptions.equity_weight,
+        "start_age": archetype.start_age,
         "n_windows": total_windows,
         "n_reached": reached,
         "pct_windows_not_reached": (total_windows - reached) / total_windows if total_windows else None,
         "years_to_fire_median": years_series.median() if reached else None,
         "years_to_fire_min": years_series.min() if reached else None,
         "years_to_fire_max": years_series.max() if reached else None,
+        # kapital, z ktorym kazde okno konczylo faze akumulacji (patrz prosba
+        # uzytkownika: "pisz o kapitale z ktorym konczyl") -- w PLN, nie
+        # znormalizowany, bo to jedyna wartosc bezposrednio interpretowalna
+        "portfolio_at_fire_median": portfolio_series.median() if reached else None,
+        "portfolio_at_fire_min": portfolio_series.min() if reached else None,
+        "portfolio_at_fire_max": portfolio_series.max() if reached else None,
+        "age_at_fire_median": age_series.median() if reached else None,
+        "age_at_fire_min": age_series.min() if reached else None,
+        "age_at_fire_max": age_series.max() if reached else None,
     }

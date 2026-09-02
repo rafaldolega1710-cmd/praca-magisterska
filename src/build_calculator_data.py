@@ -33,8 +33,23 @@ w `simulation.run_simulation`). Żadna zmiana w `simulation.py` nie była
 potrzebna -- `savings_rate` był już polem dataclass, nie stałą wpisaną
 w kod.
 
-Siatka dekumulacji jest niezależna od archetypu/kont/stopy oszczędności
-(patrz docstring `decumulation.py`) -- 3 alokacje x 3 horyzonty = 9 wpisów.
+**Dekumulacja jest teraz sprzężona z konkretną kombinacją akumulacji**
+(archetyp x konta x alokacja x stopa oszczędności), nie liczona osobno dla
+samych alokacji jak we wcześniejszej wersji tego skryptu -- od kiedy
+dekumulacja bramkuje IKE/IKZE/PPK wiekiem (`decumulation.py`), potrzebuje
+wiedzieć, ILE kapitału jest w którym koncie i w jakim wieku dana kombinacja
+w ogóle dochodzi do FIRE, a to zależy od wybranych kont. Reprezentatywny
+wiek i podział kont na moment FIRE pochodzą z pojedynczej, ciągłej ścieżki
+historycznej (`run_simulation` bez `start_month`) dla danej kombinacji --
+ta sama logika co dla "wieku emeryta" jako parametru scenariusza w
+klasycznych badaniach Bengena/Trinity (patrz docstring `decumulation.py`).
+Jeśli ta ścieżka nie dochodzi do FIRE (np. niska stopa oszczędności),
+kombinacja jest pomijana w siatce dekumulacji -- nie ma z czego wyprowadzić
+wieku/podziału kont.
+
+Horyzonty dekumulacji: `decumulation.DEFAULT_HORIZONS_YEARS` (10/15/20/25
+lat -- 25 to maksimum, jakie mieści się w dostępnych danych; 30+ lat
+świadomie pominięte, patrz docstring `decumulation.py`).
 """
 
 from __future__ import annotations
@@ -47,9 +62,9 @@ from pathlib import Path
 import pandas as pd
 
 from src.data_loader import build_processed_dataset
-from src.decumulation import DEFAULT_HORIZONS_YEARS, run_all_decumulation
+from src.decumulation import DEFAULT_HORIZONS_YEARS, run_rolling_decumulation, summarize_decumulation
 from src.scenarios import ALLOCATIONS, ARCHETYPE_A, ARCHETYPE_B
-from src.simulation import Archetype, SimulationAssumptions, run_rolling_accumulation
+from src.simulation import Archetype, SimulationAssumptions, run_rolling_accumulation, run_simulation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
@@ -80,20 +95,26 @@ def _account_combinations(archetype: Archetype) -> list[frozenset[str]]:
     return combos
 
 
-def build_accumulation_grid(market_data: pd.DataFrame) -> list[dict]:
-    rows = []
+def build_grids(market_data: pd.DataFrame) -> tuple[list[dict], list[dict]]:
+    """Zwraca (wiersze_akumulacji, wiersze_dekumulacji) dla pełnej siatki --
+    patrz docstring modułu co do sprzężenia obu."""
+    accumulation_rows: list[dict] = []
+    decumulation_rows: list[dict] = []
+
     for archetype_code, base_archetype in CALCULATOR_ARCHETYPES.items():
         account_combos = _account_combinations(base_archetype)
         for savings_rate in SAVINGS_RATES:
             archetype = dataclasses.replace(base_archetype, savings_rate=savings_rate)
             for enabled_accounts in account_combos:
+                accounts_key = _accounts_key(enabled_accounts)
                 for allocation_code, equity_weight in ALLOCATIONS.items():
                     assumptions = SimulationAssumptions(equity_weight=equity_weight, bond_weight=1 - equity_weight)
+
                     result = run_rolling_accumulation(archetype, market_data, enabled_accounts, assumptions)
-                    rows.append(
+                    accumulation_rows.append(
                         {
                             "archetype": archetype_code,
-                            "accounts": _accounts_key(enabled_accounts),
+                            "accounts": accounts_key,
                             "allocation": allocation_code,
                             "equity_weight": equity_weight,
                             "savings_rate": round(savings_rate, 2),
@@ -102,28 +123,50 @@ def build_accumulation_grid(market_data: pd.DataFrame) -> list[dict]:
                             "years_median": _round_or_none(result["years_to_fire_median"]),
                             "years_min": _round_or_none(result["years_to_fire_min"]),
                             "years_max": _round_or_none(result["years_to_fire_max"]),
+                            "portfolio_median": _round_or_none(result["portfolio_at_fire_median"], 0),
+                            "portfolio_min": _round_or_none(result["portfolio_at_fire_min"], 0),
+                            "portfolio_max": _round_or_none(result["portfolio_at_fire_max"], 0),
+                            "age_at_fire_median": _round_or_none(result["age_at_fire_median"], 1),
                         }
                     )
-    return rows
 
+                    # reprezentatywny wiek/podzial kont z pojedynczej, ciaglej
+                    # sciezki historycznej -- patrz docstring modulu
+                    _, single_path = run_simulation(archetype, market_data, enabled_accounts, assumptions)
+                    if not single_path["fire_reached"]:
+                        continue
+                    age_at_fire = single_path["age_at_fire"]
+                    account_split = single_path["account_split_at_fire"]
 
-def build_decumulation_grid(market_data: pd.DataFrame) -> list[dict]:
-    summary = run_all_decumulation(market_data=market_data, horizons_years=DEFAULT_HORIZONS_YEARS)
-    rows = []
-    for (allocation_code, horizon_years), row in summary.iterrows():
-        rows.append(
-            {
-                "allocation": allocation_code,
-                "equity_weight": row["equity_weight"],
-                "horizon_years": int(horizon_years),
-                "n_windows": int(row["n_windows"]),
-                "success_rate": _round_or_none(row["success_rate"]),
-                "ending_balance_median": _round_or_none(row["ending_balance_median"]),
-                "ending_balance_min": _round_or_none(row["ending_balance_min"]),
-                "min_balance_median": _round_or_none(row["min_balance_median"]),
-            }
-        )
-    return rows
+                    for horizon in DEFAULT_HORIZONS_YEARS:
+                        results = run_rolling_decumulation(
+                            market_data,
+                            assumptions,
+                            horizon,
+                            swr=0.04,
+                            account_split=account_split,
+                            start_age_at_fire=age_at_fire,
+                        )
+                        summary = summarize_decumulation(results)
+                        decumulation_rows.append(
+                            {
+                                "archetype": archetype_code,
+                                "accounts": accounts_key,
+                                "allocation": allocation_code,
+                                "savings_rate": round(savings_rate, 2),
+                                "horizon_years": horizon,
+                                "age_at_fire": round(age_at_fire, 2),
+                                "n_windows": summary["n_windows"],
+                                "success_rate": _round_or_none(summary["success_rate"]),
+                                "ending_balance_median": _round_or_none(summary["ending_balance_median"]),
+                                "ending_balance_min": _round_or_none(summary["ending_balance_min"]),
+                                "min_balance_median": _round_or_none(summary["min_balance_median"]),
+                                "n_failures_liquidity_gap": summary["n_failures_liquidity_gap"],
+                                "n_failures_capital_exhausted": summary["n_failures_capital_exhausted"],
+                            }
+                        )
+
+    return accumulation_rows, decumulation_rows
 
 
 def _round_or_none(value, ndigits: int = 4):
@@ -140,12 +183,14 @@ def build_calculator_data(
     from src.simulation import _clean_market_data
 
     cleaned = _clean_market_data(market_data)
+    accumulation_rows, decumulation_rows = build_grids(market_data)
 
     payload = {
         "meta": {
             "data_range": f"{cleaned.index.min()} - {cleaned.index.max()}",
             "n_months": len(cleaned),
             "swr": 0.04,
+            "decumulation_horizons": list(DEFAULT_HORIZONS_YEARS),
         },
         "archetypes": {
             code: {
@@ -153,11 +198,12 @@ def build_calculator_data(
                 "ppk_eligible": archetype.ppk_eligible,
                 "monthly_net_income": archetype.monthly_net_income,
                 "savings_rate": archetype.savings_rate,
+                "start_age": archetype.start_age,
             }
             for code, archetype in CALCULATOR_ARCHETYPES.items()
         },
-        "accumulation": build_accumulation_grid(market_data),
-        "decumulation": build_decumulation_grid(market_data),
+        "accumulation": accumulation_rows,
+        "decumulation": decumulation_rows,
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
