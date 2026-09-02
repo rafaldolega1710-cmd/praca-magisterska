@@ -1,0 +1,595 @@
+<meta charset="UTF-8">
+<title>Kalkulator FIRE-PL</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340..680&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f2f3ef;
+    --surface: #fdfdfb;
+    --surface-sunken: #e8e9e3;
+    --border: #d7d8d0;
+    --ink: #1c211e;
+    --ink-muted: #5c635c;
+    --ink-faint: #8a8f86;
+    --accent: #8f5a1e;
+    --accent-strong: #6e4415;
+    --accent-soft: #efe0c8;
+    --on-accent: #fbf6ec;
+    --success: #2b7361;
+    --success-soft: #dcece6;
+    --risk: #a13f3f;
+    --risk-soft: #f2dfdd;
+    --shadow: 0 1px 2px rgba(28,33,30,0.06), 0 8px 24px -12px rgba(28,33,30,0.18);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14181a;
+      --surface: #1b2022;
+      --surface-sunken: #12161b;
+      --border: #303734;
+      --ink: #eae8e0;
+      --ink-muted: #a3a99e;
+      --ink-faint: #767c73;
+      --accent: #d3a15a;
+      --accent-strong: #e9bb7c;
+      --accent-soft: #3a2e19;
+      --on-accent: #201603;
+      --success: #63b39d;
+      --success-soft: #1c342d;
+      --risk: #d5867f;
+      --risk-soft: #3a201d;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -14px rgba(0,0,0,0.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181a;
+    --surface: #1b2022;
+    --surface-sunken: #12161b;
+    --border: #303734;
+    --ink: #eae8e0;
+    --ink-muted: #a3a99e;
+    --ink-faint: #767c73;
+    --accent: #d3a15a;
+    --accent-strong: #e9bb7c;
+    --accent-soft: #3a2e19;
+    --on-accent: #201603;
+    --success: #63b39d;
+    --success-soft: #1c342d;
+    --risk: #d5867f;
+    --risk-soft: #3a201d;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 28px -14px rgba(0,0,0,0.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; text-wrap: balance; margin: 0; }
+  .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  a { color: var(--accent-strong); }
+
+  .page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 40px 24px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  header.hero {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  header.hero h1 {
+    font-size: clamp(28px, 4vw, 38px);
+    font-weight: 560;
+    font-optical-sizing: auto;
+    color: var(--ink);
+  }
+  header.hero p {
+    max-width: 62ch;
+    color: var(--ink-muted);
+    margin: 0;
+    font-size: 15px;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .controls {
+    position: sticky;
+    top: 20px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  @media (max-width: 860px) { .controls { position: static; } }
+
+  .control-block { display: flex; flex-direction: column; gap: 10px; }
+  .control-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+  }
+
+  .archetype-option {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    background: var(--surface-sunken);
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .archetype-option + .archetype-option { margin-top: 8px; }
+  .archetype-option:hover { border-color: var(--accent); }
+  .archetype-option.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .archetype-option input { position: absolute; opacity: 0; pointer-events: none; }
+  .archetype-name { font-weight: 600; font-size: 14px; }
+  .archetype-meta { font-size: 12.5px; color: var(--ink-muted); }
+  .archetype-option.active .archetype-meta { color: var(--ink); opacity: 0.75; }
+
+  .check-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-sunken);
+  }
+  .check-row + .check-row { margin-top: 7px; }
+  .check-row.disabled { opacity: 0.45; }
+  .check-left { display: flex; align-items: center; gap: 9px; }
+  .check-left input[type="checkbox"] {
+    width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer;
+  }
+  .check-left input[type="checkbox"]:disabled { cursor: not-allowed; }
+  .check-name { font-weight: 600; font-size: 13.5px; }
+  .check-note { font-size: 11.5px; color: var(--ink-faint); display: block; margin-top: 1px; }
+
+  .segmented {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .segmented button {
+    flex: 1;
+    padding: 9px 6px;
+    border: none;
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .segmented button:last-child { border-right: none; }
+  .segmented button:hover { color: var(--ink); }
+  .segmented button.active { background: var(--accent); color: var(--on-accent); }
+  .segmented button:focus-visible, .archetype-option:focus-within, .check-left input:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .results { display: flex; flex-direction: column; gap: 20px; }
+
+  .card { padding: 22px 24px; }
+  .card h2 {
+    font-size: 20px;
+    font-weight: 560;
+    margin-bottom: 4px;
+  }
+  .card .subhead { color: var(--ink-muted); font-size: 13.5px; margin-bottom: 18px; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 6px;
+  }
+  @media (max-width: 560px) { .stat-grid { grid-template-columns: 1fr 1fr; } }
+  .stat {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .stat .label { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .stat .value { font-size: 22px; font-weight: 600; }
+  .stat .value.hero-value { font-size: 30px; color: var(--accent-strong); }
+  .stat .unit { font-size: 12px; color: var(--ink-muted); }
+
+  .range-bar-wrap { margin: 18px 0 6px; }
+  .range-bar-labels { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-faint); margin-bottom: 5px; font-family: "IBM Plex Mono", monospace;}
+  .range-bar {
+    position: relative;
+    height: 10px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+  .range-bar .fill {
+    position: absolute; top: -1px; bottom: -1px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+  }
+  .range-bar .marker {
+    position: absolute; top: -5px;
+    width: 3px; height: 20px;
+    background: var(--accent-strong);
+    border-radius: 2px;
+    transform: translateX(-50%);
+  }
+
+  .callout {
+    display: flex;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    border: 1px solid;
+  }
+  .callout.info { background: var(--surface-sunken); border-color: var(--border); color: var(--ink-muted); }
+  .callout.warn { background: var(--risk-soft); border-color: var(--risk); color: var(--ink); }
+  .callout.ok { background: var(--success-soft); border-color: var(--success); color: var(--ink); }
+  .callout .icon { flex-shrink: 0; font-family: "IBM Plex Mono", monospace; font-weight: 700; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .pill.ok { background: var(--success-soft); color: var(--success); }
+  .pill.warn { background: var(--risk-soft); color: var(--risk); }
+
+  .divider-label {
+    display: flex; align-items: center; gap: 12px;
+    color: var(--ink-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .divider-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .horizon-row { display: flex; gap: 8px; margin-bottom: 18px; }
+  .horizon-row button {
+    padding: 7px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .horizon-row button.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .horizon-row button:hover { color: var(--ink); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+    font-size: 12px;
+    color: var(--ink-faint);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  footer strong { color: var(--ink-muted); }
+</style>
+
+<div class="page">
+
+  <header class="hero">
+    <div class="eyebrow">FIRE-PL &middot; symulator wykonalności</div>
+    <h1>Ile lat dzieli Cię od niezależności finansowej?</h1>
+    <p>Interaktywna warstwa wyników pracy magisterskiej — wybierz archetyp gospodarstwa domowego, zaznacz, z których kont podatkowych korzysta, i sprawdź medianę oraz zakres (szczęśliwy/pechowy przypadek) czasu do FIRE, policzone na wielu historycznych oknach startowych polskiego rynku 1998–2026.</p>
+  </header>
+
+  <div class="layout">
+
+    <aside class="panel controls">
+
+      <div class="control-block">
+        <div class="control-label">Archetyp gospodarstwa</div>
+        <div id="archetype-options"></div>
+      </div>
+
+      <div class="control-block">
+        <div class="control-label">Konta podatkowe</div>
+        <div id="account-checks"></div>
+      </div>
+
+      <div class="control-block">
+        <div class="control-label">Alokacja akcje / obligacje</div>
+        <div class="segmented" id="allocation-seg">
+          <button data-alloc="80_20">80 / 20</button>
+          <button data-alloc="60_40">60 / 40</button>
+          <button data-alloc="40_60">40 / 60</button>
+        </div>
+      </div>
+
+    </aside>
+
+    <main class="results">
+
+      <section class="panel card" id="accumulation-card">
+        <h2>Faza akumulacji</h2>
+        <div class="subhead" id="accumulation-subhead"></div>
+
+        <div id="accumulation-body"></div>
+
+      </section>
+
+      <div class="divider-label">Faza dystrybucji (dekumulacja)</div>
+
+      <section class="panel card" id="decumulation-card">
+        <h2>Reguła 4% na emeryturze</h2>
+        <div class="subhead">Portfel dokładnie równy celowi FIRE (25× roczne wydatki) w chwili przejścia na wypłaty — test przetrwania na tej samej alokacji, wielu historycznych oknach startowych.</div>
+
+        <div class="horizon-row" id="horizon-row">
+          <button data-horizon="10">10 lat</button>
+          <button data-horizon="15">15 lat</button>
+          <button data-horizon="20">20 lat</button>
+        </div>
+
+        <div id="decumulation-body"></div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+  <footer>
+    <div><strong>Metodologia:</strong> każdy wynik to agregat wielu przebiegów symulacji startujących co 6 miesięcy w dostępnych danych (<span class="num" id="meta-range"></span>, <span class="num" id="meta-months"></span> mies.) — nie jedna ścieżka historyczna. Akumulacja: 57 okien startowych na kombinację. Dekumulacja: reguła SWR 4%, wypłata indeksowana realną inflacją GUS co styczeń.</div>
+    <div><strong>Uproszczenia:</strong> dekumulacja liczona na połączonym saldzie portfela (bez podziału na konta, bez podatku/kar przy wypłacie) — patrz README repozytorium. Horyzonty dekumulacji skrócone do 10/15/20 lat (nie klasycznych 30) — dane obejmują ~28 lat.</div>
+  </footer>
+
+</div>
+
+<script id="calc-data" type="application/json">
+{"meta": {"data_range": "1998-02 - 2026-07", "n_months": 342, "swr": 0.04}, "archetypes": {"A": {"name": "Informatyk B2B", "ppk_eligible": false, "monthly_net_income": 19000.0, "savings_rate": 0.5}, "B": {"name": "Rodzina 2+2", "ppk_eligible": true, "monthly_net_income": 13000.0, "savings_rate": 0.2}}, "accumulation": [{"archetype": "A", "accounts": "none", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.614, "years_median": 18.125, "years_min": 15.3333, "years_max": 19.0}, {"archetype": "A", "accounts": "none", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6667, "years_median": 19.6667, "years_min": 17.75, "years_max": 21.1667}, {"archetype": "A", "accounts": "none", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7544, "years_median": 21.1667, "years_min": 19.8333, "years_max": 22.9167}, {"archetype": "A", "accounts": "ike", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.614, "years_median": 18.0833, "years_min": 15.3333, "years_max": 19.0}, {"archetype": "A", "accounts": "ike", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6667, "years_median": 19.6667, "years_min": 17.75, "years_max": 21.0}, {"archetype": "A", "accounts": "ike", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7544, "years_median": 21.1667, "years_min": 19.8333, "years_max": 22.9167}, {"archetype": "A", "accounts": "ikze", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.614, "years_median": 18.0833, "years_min": 15.3333, "years_max": 19.0}, {"archetype": "A", "accounts": "ikze", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6667, "years_median": 19.5833, "years_min": 17.3333, "years_max": 20.9167}, {"archetype": "A", "accounts": "ikze", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7368, "years_median": 21.1667, "years_min": 19.75, "years_max": 22.9167}, {"archetype": "A", "accounts": "oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.614, "years_median": 17.7917, "years_min": 15.25, "years_max": 18.9167}, {"archetype": "A", "accounts": "oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6667, "years_median": 19.25, "years_min": 17.3333, "years_max": 20.6667}, {"archetype": "A", "accounts": "oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7368, "years_median": 21.0, "years_min": 19.6667, "years_max": 22.4167}, {"archetype": "A", "accounts": "ike,ikze", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.614, "years_median": 18.0833, "years_min": 15.3333, "years_max": 19.0}, {"archetype": "A", "accounts": "ike,ikze", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6667, "years_median": 19.5833, "years_min": 17.3333, "years_max": 20.9167}, {"archetype": "A", "accounts": "ike,ikze", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7368, "years_median": 21.0833, "years_min": 19.75, "years_max": 22.8333}, {"archetype": "A", "accounts": "ike,oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.5965, "years_median": 17.75, "years_min": 15.25, "years_max": 18.9167}, {"archetype": "A", "accounts": "ike,oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6491, "years_median": 19.2083, "years_min": 17.3333, "years_max": 20.6667}, {"archetype": "A", "accounts": "ike,oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7368, "years_median": 20.75, "years_min": 19.3333, "years_max": 22.4167}, {"archetype": "A", "accounts": "ikze,oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.5965, "years_median": 17.75, "years_min": 14.8333, "years_max": 18.75}, {"archetype": "A", "accounts": "ikze,oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6491, "years_median": 19.1667, "years_min": 17.25, "years_max": 20.4167}, {"archetype": "A", "accounts": "ikze,oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7368, "years_median": 20.5833, "years_min": 19.3333, "years_max": 22.4167}, {"archetype": "A", "accounts": "ike,ikze,oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 0.5965, "years_median": 17.75, "years_min": 14.8333, "years_max": 18.75}, {"archetype": "A", "accounts": "ike,ikze,oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 0.6491, "years_median": 19.125, "years_min": 17.25, "years_max": 20.4167}, {"archetype": "A", "accounts": "ike,ikze,oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 0.7368, "years_median": 20.5833, "years_min": 19.3333, "years_max": 22.4167}, {"archetype": "B", "accounts": "none", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "none", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "none", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "oki,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "oki,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "oki,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,oki", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,oki", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,oki", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,oki,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,oki,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,oki,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,oki,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,oki,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ikze,oki,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,oki,ppk", "allocation": "80_20", "equity_weight": 0.8, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,oki,ppk", "allocation": "60_40", "equity_weight": 0.6, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}, {"archetype": "B", "accounts": "ike,ikze,oki,ppk", "allocation": "40_60", "equity_weight": 0.4, "n_windows": 57, "pct_not_reached": 1.0, "years_median": null, "years_min": null, "years_max": null}], "decumulation": [{"allocation": "80_20", "equity_weight": 0.8, "horizon_years": 10, "n_windows": 38, "success_rate": 1.0, "ending_balance_median": 1.3879, "ending_balance_min": 0.4301, "min_balance_median": 0.8452}, {"allocation": "80_20", "equity_weight": 0.8, "horizon_years": 15, "n_windows": 28, "success_rate": 1.0, "ending_balance_median": 1.6026, "ending_balance_min": 0.3701, "min_balance_median": 0.7091}, {"allocation": "80_20", "equity_weight": 0.8, "horizon_years": 20, "n_windows": 18, "success_rate": 1.0, "ending_balance_median": 1.7282, "ending_balance_min": 0.1314, "min_balance_median": 0.6681}, {"allocation": "60_40", "equity_weight": 0.6, "horizon_years": 10, "n_windows": 38, "success_rate": 1.0, "ending_balance_median": 1.3672, "ending_balance_min": 0.651, "min_balance_median": 0.9359}, {"allocation": "60_40", "equity_weight": 0.6, "horizon_years": 15, "n_windows": 28, "success_rate": 1.0, "ending_balance_median": 1.5038, "ending_balance_min": 0.7051, "min_balance_median": 0.8189}, {"allocation": "60_40", "equity_weight": 0.6, "horizon_years": 20, "n_windows": 18, "success_rate": 1.0, "ending_balance_median": 1.7174, "ending_balance_min": 0.5725, "min_balance_median": 0.7787}, {"allocation": "40_60", "equity_weight": 0.4, "horizon_years": 10, "n_windows": 38, "success_rate": 1.0, "ending_balance_median": 1.3405, "ending_balance_min": 0.919, "min_balance_median": 0.9698}, {"allocation": "40_60", "equity_weight": 0.4, "horizon_years": 15, "n_windows": 28, "success_rate": 1.0, "ending_balance_median": 1.4596, "ending_balance_min": 1.0506, "min_balance_median": 0.9358}, {"allocation": "40_60", "equity_weight": 0.4, "horizon_years": 20, "n_windows": 18, "success_rate": 1.0, "ending_balance_median": 1.7385, "ending_balance_min": 0.9956, "min_balance_median": 0.9083}]}
+</script>
+
+<script>
+(function () {
+  var DATA = JSON.parse(document.getElementById('calc-data').textContent);
+
+  var ACCUM = new Map();
+  DATA.accumulation.forEach(function (row) {
+    ACCUM.set(row.archetype + '|' + row.accounts + '|' + row.allocation, row);
+  });
+  var DECUM = new Map();
+  DATA.decumulation.forEach(function (row) {
+    DECUM.set(row.allocation + '|' + row.horizon_years, row);
+  });
+
+  var state = {
+    archetype: 'A',
+    accounts: { ike: true, ikze: true, ppk: true, oki: true },
+    allocation: '80_20',
+    horizon: 10
+  };
+
+  var ACCOUNT_LABELS = {
+    ike: ['IKE', 'Indywidualne Konto Emerytalne — zwolnienie z podatku Belki po 60. r.ż.'],
+    ikze: ['IKZE', 'Indywidualne Konto Zabezpieczenia Emerytalnego — ulga PIT co roku, 10% podatku przy wypłacie'],
+    ppk: ['PPK', 'Pracownicze Plany Kapitałowe — dopłaty pracodawcy i państwa'],
+    oki: ['OKI', 'Ogólne Konto Inwestycyjne — od 1.01.2027, limit 100 000 zł rocznie']
+  };
+
+  function fmt(n, digits) {
+    if (n === null || n === undefined || Number.isNaN(n)) return '—';
+    return n.toLocaleString('pl-PL', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function accountsKey() {
+    var archetype = DATA.archetypes[state.archetype];
+    var keys = ['ike', 'ikze', 'oki'];
+    if (archetype.ppk_eligible) keys.push('ppk');
+    var selected = keys.filter(function (k) { return state.accounts[k]; }).sort();
+    return selected.length ? selected.join(',') : 'none';
+  }
+
+  function renderArchetypeOptions() {
+    var el = document.getElementById('archetype-options');
+    el.innerHTML = '';
+    Object.keys(DATA.archetypes).forEach(function (code) {
+      var a = DATA.archetypes[code];
+      var opt = document.createElement('label');
+      opt.className = 'archetype-option' + (state.archetype === code ? ' active' : '');
+      opt.innerHTML =
+        '<input type="radio" name="archetype" value="' + code + '"' + (state.archetype === code ? ' checked' : '') + '>' +
+        '<span class="archetype-name">' + a.name + '</span>' +
+        '<span class="archetype-meta">' + fmt(a.monthly_net_income, 0) + ' zł netto/mies. &middot; oszczędza ' + Math.round(a.savings_rate * 100) + '%' + (a.ppk_eligible ? ' &middot; PPK dostępne' : ' &middot; brak PPK (B2B)') + '</span>';
+      opt.querySelector('input').addEventListener('change', function () {
+        state.archetype = code;
+        render();
+      });
+      el.appendChild(opt);
+    });
+  }
+
+  function renderAccountChecks() {
+    var el = document.getElementById('account-checks');
+    el.innerHTML = '';
+    var archetype = DATA.archetypes[state.archetype];
+    ['ike', 'ikze', 'ppk', 'oki'].forEach(function (key) {
+      var disabled = key === 'ppk' && !archetype.ppk_eligible;
+      var row = document.createElement('label');
+      row.className = 'check-row' + (disabled ? ' disabled' : '');
+      var checked = disabled ? false : state.accounts[key];
+      row.innerHTML =
+        '<span class="check-left">' +
+        '<input type="checkbox" ' + (checked ? 'checked' : '') + (disabled ? ' disabled' : '') + '>' +
+        '<span><span class="check-name">' + ACCOUNT_LABELS[key][0] + '</span>' +
+        '<span class="check-note">' + (disabled ? 'niedostępne dla tego archetypu' : ACCOUNT_LABELS[key][1]) + '</span></span>' +
+        '</span>';
+      if (!disabled) {
+        row.querySelector('input').addEventListener('change', function (e) {
+          state.accounts[key] = e.target.checked;
+          render();
+        });
+      }
+      el.appendChild(row);
+    });
+  }
+
+  function renderAllocationSeg() {
+    var buttons = document.querySelectorAll('#allocation-seg button');
+    buttons.forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.alloc === state.allocation);
+      btn.onclick = function () { state.allocation = btn.dataset.alloc; render(); };
+    });
+  }
+
+  function renderHorizonRow() {
+    var buttons = document.querySelectorAll('#horizon-row button');
+    buttons.forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.horizon === String(state.horizon));
+      btn.onclick = function () { state.horizon = Number(btn.dataset.horizon); render(); };
+    });
+  }
+
+  function renderAccumulation() {
+    var archetype = DATA.archetypes[state.archetype];
+    var key = state.archetype + '|' + accountsKey() + '|' + state.allocation;
+    var row = ACCUM.get(key);
+    var subhead = document.getElementById('accumulation-subhead');
+    subhead.textContent = archetype.name + ' · alokacja ' + state.allocation.replace('_', '/') + ' · ' + row.n_windows + ' testowanych okien startowych';
+
+    var body = document.getElementById('accumulation-body');
+    var pctReached = Math.round((1 - row.pct_not_reached) * 100);
+
+    if (row.years_median === null) {
+      body.innerHTML =
+        '<div class="callout warn"><span class="icon">!</span>' +
+        '<span>Cel FIRE nie został osiągnięty w <strong>żadnym</strong> z ' + row.n_windows + ' testowanych okien startowych w dostępnym oknie danych (' + DATA.meta.data_range.replace(' - ', ' – ') + '). Przy stopie oszczędności ' + Math.round(archetype.savings_rate * 100) + '% i tej alokacji akumulacja tego archetypu wymaga więcej czasu, niż mieści się w ~28-letniej historii, na której działa symulator.</span></div>';
+      return;
+    }
+
+    var domainMin = 10, domainMax = 26;
+    var pct = function (y) { return Math.max(0, Math.min(100, (y - domainMin) / (domainMax - domainMin) * 100)); };
+
+    body.innerHTML =
+      '<div class="stat-grid">' +
+        '<div class="stat"><span class="label">Mediana</span><span class="value hero-value num">' + fmt(row.years_median, 1) + '</span><span class="unit">lat do FIRE</span></div>' +
+        '<div class="stat"><span class="label">Szczęśliwy przypadek</span><span class="value num">' + fmt(row.years_min, 1) + '</span><span class="unit">lat (min.)</span></div>' +
+        '<div class="stat"><span class="label">Pechowy przypadek</span><span class="value num">' + fmt(row.years_max, 1) + '</span><span class="unit">lat (maks.)</span></div>' +
+      '</div>' +
+      '<div class="range-bar-wrap">' +
+        '<div class="range-bar-labels"><span>' + domainMin + ' lat</span><span>' + domainMax + ' lat</span></div>' +
+        '<div class="range-bar">' +
+          '<div class="fill" style="left:' + pct(row.years_min) + '%; right:' + (100 - pct(row.years_max)) + '%;"></div>' +
+          '<div class="marker" style="left:' + pct(row.years_median) + '%;"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="callout info" style="margin-top:16px;"><span class="icon">i</span>' +
+        '<span>Cel osiągnięty w <strong>' + pctReached + '%</strong> z ' + row.n_windows + ' testowanych okien startowych. Pozostałym zabrakło czasu do końca dostępnych danych (' + DATA.meta.data_range.split(' - ')[1] + ') — im bliżej końca historii zaczyna się okno, tym mniej ma "zapasu" na dogonienie ' + fmt(row.years_median, 0) + '+ letniego celu. To ograniczenie danych, nie prognoza złych zwrotów.</span></div>';
+  }
+
+  function renderDecumulation() {
+    var key = state.allocation + '|' + state.horizon;
+    var row = DECUM.get(key);
+    var body = document.getElementById('decumulation-body');
+
+    if (!row) {
+      body.innerHTML = '<div class="callout warn"><span class="icon">!</span><span>Brak wystarczających danych dla tej kombinacji.</span></div>';
+      return;
+    }
+
+    var successPct = Math.round(row.success_rate * 100);
+    var pillClass = row.success_rate >= 0.9 ? 'ok' : 'warn';
+
+    var domainMax = 2.0;
+    var pctBal = function (v) { return Math.max(0, Math.min(100, v / domainMax * 100)); };
+
+    body.innerHTML =
+      '<div class="stat-grid">' +
+        '<div class="stat"><span class="label">Wskaźnik przetrwania</span><span class="value hero-value num">' + successPct + '%</span><span class="unit">z ' + row.n_windows + ' okien</span></div>' +
+        '<div class="stat"><span class="label">Saldo końcowe (mediana)</span><span class="value num">' + fmt(row.ending_balance_median * 100, 0) + '%</span><span class="unit">celu FIRE</span></div>' +
+        '<div class="stat"><span class="label">Najgłębsze obsunięcie</span><span class="value num">' + fmt((1 - row.min_balance_median) * 100, 0) + '%</span><span class="unit">mediana drawdown</span></div>' +
+      '</div>' +
+      '<div class="range-bar-wrap">' +
+        '<div class="range-bar-labels"><span>0%</span><span>saldo jako % celu startowego</span><span>' + Math.round(domainMax * 100) + '%</span></div>' +
+        '<div class="range-bar">' +
+          '<div class="fill" style="left:' + pctBal(row.ending_balance_min) + '%; right:' + (100 - pctBal(row.ending_balance_median)) + '%;"></div>' +
+          '<div class="marker" style="left:' + pctBal(1.0) + '%; background: var(--ink-faint);" title="punkt startowy = 100%"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="callout ' + (row.success_rate >= 0.999 ? 'ok' : 'warn') + '" style="margin-top:16px;"><span class="icon">' + (row.success_rate >= 0.999 ? '✓' : '!') + '</span>' +
+        '<span>' + (row.success_rate >= 0.999
+          ? 'Portfel przetrwał wszystkie ' + row.n_windows + ' testowanych ' + state.horizon + '-letnich okien wypłat regułą 4%, nie schodząc do zera. Nawet w najgorszym przetestowanym oknie saldo końcowe wyniosło ' + fmt(row.ending_balance_min * 100, 0) + '% wartości startowej.'
+          : 'Portfel przetrwał ' + successPct + '% testowanych ' + state.horizon + '-letnich okien wypłat regułą 4%. Pozostałe okna wyczerpały kapitał przed końcem horyzontu.') +
+        '</span></div>';
+  }
+
+  function render() {
+    renderArchetypeOptions();
+    renderAccountChecks();
+    renderAllocationSeg();
+    renderHorizonRow();
+    renderAccumulation();
+    renderDecumulation();
+  }
+
+  document.getElementById('meta-range').textContent = DATA.meta.data_range.replace(' - ', ' – ');
+  document.getElementById('meta-months').textContent = DATA.meta.n_months;
+
+  render();
+})();
+</script>
