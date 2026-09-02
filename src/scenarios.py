@@ -46,6 +46,7 @@ ARCHETYPE_A = Archetype(
     marginal_tax_rate=0.19,
     ppk_eligible=False,
     household_multiplier=1,
+    start_age=30,  # zaczyna oszczedzac na starcie kariery -- patrz README, "Zalozenia modelu"
 )
 
 # Archetyp B: rodzina 2+2, oboje rodzice na UoP (podrozdz. 3.4)
@@ -60,6 +61,7 @@ ARCHETYPE_B = Archetype(
     marginal_tax_rate=0.12,
     ppk_eligible=True,
     household_multiplier=2,
+    start_age=30,  # ten sam wiek startowy co archetyp A -- porownywalne scenariusze
 )
 
 # {kod scenariusza: (archetyp, enabled_accounts)}
@@ -114,6 +116,7 @@ def run_all_scenarios(
                 "single_path_fire_reached": single_path_summary["fire_reached"],
                 "single_path_years_to_fire": single_path_summary["years_to_fire"],
                 "single_path_final_value": single_path_summary["final_portfolio_value"],
+                "single_path_age_at_fire": single_path_summary["age_at_fire"],
                 "single_path_cumulative_dividend_tax": single_path_summary["cumulative_dividend_tax"],
                 "single_path_cumulative_rebalancing_tax": single_path_summary["cumulative_rebalancing_tax"],
                 "rolling_n_windows": rolling_summary["n_windows"],
@@ -121,6 +124,14 @@ def run_all_scenarios(
                 "years_to_fire_median": rolling_summary["years_to_fire_median"],
                 "years_to_fire_min": rolling_summary["years_to_fire_min"],
                 "years_to_fire_max": rolling_summary["years_to_fire_max"],
+                # kapital i wiek, z ktorym poszczegolne okna konczyly akumulacje
+                # (start_age=30 dla obu archetypow -- patrz Archetype.start_age)
+                "portfolio_at_fire_median": rolling_summary["portfolio_at_fire_median"],
+                "portfolio_at_fire_min": rolling_summary["portfolio_at_fire_min"],
+                "portfolio_at_fire_max": rolling_summary["portfolio_at_fire_max"],
+                "age_at_fire_median": rolling_summary["age_at_fire_median"],
+                "age_at_fire_min": rolling_summary["age_at_fire_min"],
+                "age_at_fire_max": rolling_summary["age_at_fire_max"],
             }
             summaries.append(row)
 
