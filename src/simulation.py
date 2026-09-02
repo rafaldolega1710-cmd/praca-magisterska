@@ -189,17 +189,35 @@ def _rebalance_standard_account(
     return tax_paid, cost_basis
 
 
+ALL_ACCOUNTS = frozenset({"ike", "ikze", "ppk", "oki"})
+NO_ACCOUNTS = frozenset()
+
+
 def run_simulation(
     archetype: Archetype,
     market_data: pd.DataFrame,
-    use_tax_vehicles: bool,
+    enabled_accounts: frozenset[str],
     assumptions: SimulationAssumptions | None = None,
     oki_kind: str = "investment",
+    start_month: pd.Period | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Uruchamia miesięczną symulację akumulacji kapitału dla jednego
-    archetypu i wariantu (z/bez wehikułów podatkowych) na rzeczywistej,
-    historycznej sekwencji zwrotów z `market_data` (wynik
-    `data_loader.build_processed_dataset()`).
+    archetypu na rzeczywistej, historycznej sekwencji zwrotów z
+    `market_data` (wynik `data_loader.build_processed_dataset()`).
+
+    `enabled_accounts` to dowolny podzbiór `{"ike", "ikze", "ppk", "oki"}` --
+    puste `NO_ACCOUNTS` odpowiada dawnemu `use_tax_vehicles=False` (100%
+    nadwyżki na rachunek standardowy), pełne `ALL_ACCOUNTS` dawnemu
+    `use_tax_vehicles=True`. Wyłączenie konta nie wymaga zmian w
+    `tax_engine.allocate_monthly_surplus` -- wystarczy przekazać mu limit
+    0.0 dla wyłączonego konta, co naturalnie kieruje nadwyżkę do kolejnego
+    ogniwa kaskady. Ta granularność zasila interaktywny kalkulator
+    (`kalkulator.html`) -- każde konto da się "kliknąć" osobno.
+
+    `start_month`, jeśli podany, przesuwa punkt startowy symulacji w obrębie
+    dostępnych danych -- to jest mechanizm, na którym opiera się
+    `run_rolling_accumulation` (wiele okien startowych zamiast jednej
+    ścieżki).
 
     Zwraca (miesięczny_ledger, podsumowanie). Podsumowanie zawiera m.in.
     `fire_reached`, `fire_month`, `years_to_fire`, `final_portfolio_value`,
@@ -235,6 +253,19 @@ def run_simulation(
     )
     data["usd_pln_change"] = data["usd_pln"].pct_change().fillna(0.0)
 
+    if start_month is not None:
+        # `usd_pln_change` juz policzone na PELNYCH danych powyzej -- odciecie
+        # dopiero teraz gwarantuje, ze pierwszy miesiac danego okna startowego
+        # ma sensowna (nie sztucznie wyzerowana) zmiane kursu wzgledem
+        # poprzedniego miesiaca, tak jak w kazdym innym punkcie szeregu.
+        data = data[data.index >= start_month]
+        if data.empty:
+            raise ValueError(f"Brak danych od podanego start_month={start_month}.")
+
+    # dochod archetypu jest zakotwiczony w wynagrodzeniu Z MIESIACA STARTOWEGO
+    # tego konkretnego okna, nie w pierwszym miesiacu calego zbioru danych --
+    # inaczej ktos "zaczynajacy" symulacje w 2015 r. mialby dochod
+    # przeskalowany tak, jakby zaczynal w 1998 r.
     base_wage = data["avg_gross_wage_pln"].iloc[0]
 
     portfolio: dict[str, dict[str, float]] = {name: _empty_account() for name in ACCOUNT_NAMES}
@@ -291,8 +322,8 @@ def run_simulation(
         if refund_key in pending_ikze_refunds and cal_month == 4:
             surplus += pending_ikze_refunds.pop(refund_key)
 
-        if use_tax_vehicles:
-            if archetype.ppk_eligible:
+        if enabled_accounts:
+            if archetype.ppk_eligible and "ppk" in enabled_accounts:
                 employee_contrib, employer_contrib = ppk_monthly_contribution(monthly_net_income)
                 # miesiac uczestnictwa w PPK liczony od poczatku symulacji (przyblizenie -- patrz README)
                 month_index_in_ppk = len(rows) + 1
@@ -303,10 +334,17 @@ def run_simulation(
             else:
                 surplus_after_ppk = surplus
 
+            # limit 0.0 dla wylaczonego konta -> allocate_monthly_surplus samo
+            # pomija ten etap kaskady i kieruje nadwyzke dalej, bez zadnych
+            # zmian w samej funkcji kaskady (patrz docstring run_simulation)
+            gated_limits = {
+                key: (limits[key] if key in enabled_accounts else 0.0)
+                for key in ("ikze", "ike", "oki")
+            }
             allocation = allocate_monthly_surplus(
                 surplus_after_ppk,
                 ytd_state,
-                {"ikze": limits["ikze"], "ike": limits["ike"], "oki": limits["oki"]},
+                gated_limits,
                 ppk_eligible=False,  # PPK juz obsluzone osobno powyzej
             )
             for account_name in ["ikze", "ike", "oki", "standard"]:
@@ -371,7 +409,7 @@ def run_simulation(
     ledger = pd.DataFrame(rows).set_index("month")
     summary = {
         "archetype": archetype.name,
-        "use_tax_vehicles": use_tax_vehicles,
+        "enabled_accounts": ",".join(sorted(enabled_accounts)) if enabled_accounts else "none",
         "equity_weight": assumptions.equity_weight,
         "fire_reached": fire_month is not None,
         "fire_month": str(fire_month) if fire_month is not None else None,
@@ -385,3 +423,70 @@ def run_simulation(
         "cumulative_rebalancing_tax": ledger["rebalancing_tax"].sum(),
     }
     return ledger, summary
+
+
+def _clean_market_data(market_data: pd.DataFrame) -> pd.DataFrame:
+    """Ta sama logika czyszczenia co na początku `run_simulation` (ffill
+    końcówek rocznych serii, przycięcie do wspólnego zakresu) -- wydzielona,
+    żeby `run_rolling_accumulation` mogła ustalić zbiór możliwych miesięcy
+    startowych bez powielania jej ręcznie."""
+    data = market_data.sort_index().copy()
+    data["cpi_prev_year_100"] = data["cpi_prev_year_100"].ffill()
+    data["avg_gross_wage_pln"] = data["avg_gross_wage_pln"].ffill()
+    return data.dropna(
+        subset=["acwi_monthly_return", "usd_pln", "edo_reference_monthly_return", "avg_gross_wage_pln"]
+    )
+
+
+def run_rolling_accumulation(
+    archetype: Archetype,
+    market_data: pd.DataFrame,
+    enabled_accounts: frozenset[str],
+    assumptions: SimulationAssumptions | None = None,
+    oki_kind: str = "investment",
+    step_months: int = 6,
+) -> dict:
+    """Uruchamia `run_simulation` osobno dla wielu miesięcy startowych w
+    dostępnych danych i agreguje wynik w stylu Bengena/Trinity Study:
+    mediana ("przeciętny" przypadek), min ("szczęśliwy"), max wśród okien,
+    które faktycznie osiągnęły cel ("pechowy"), oraz odsetek okien, które
+    w ogóle nie zdążyły -- bo zabrakło dla nich wystarczająco długiego
+    ogona danych, nie dlatego że model "nie działa".
+
+    `step_months` (domyślnie co 6. miesiąc, nie co 5 lat jak w klasycznych
+    backtestach na papierze w stockbroker.pl) to kompromis między pełną
+    rozdzielczością danych a czasem obliczeń -- pojedyncze okno to setki
+    miesięcy symulacji, a interaktywny kalkulator (Etap 4, część 3) potrzebuje
+    dziesiątek takich wywołań w rozsądnym czasie. Nawet co 6 miesięcy to
+    wciąż gęściej niż 5-letni odstęp referencyjnego kalkulatora, proporcjonalnie
+    do długości dostępnej historii.
+
+    Zastępuje pojedynczą, ciągłą ścieżkę historyczną używaną we wcześniejszych
+    etapach -- ta sama metodologia co `decumulation.run_rolling_decumulation`.
+    """
+    assumptions = assumptions or SimulationAssumptions()
+    start_months = _clean_market_data(market_data).index[::step_months]
+
+    years_to_fire: list[float] = []
+    for start in start_months:
+        _, summary = run_simulation(
+            archetype, market_data, enabled_accounts, assumptions, oki_kind, start_month=start
+        )
+        if summary["fire_reached"]:
+            years_to_fire.append(summary["years_to_fire"])
+
+    total_windows = len(start_months)
+    reached = len(years_to_fire)
+    years_series = pd.Series(years_to_fire, dtype=float)
+
+    return {
+        "archetype": archetype.name,
+        "enabled_accounts": ",".join(sorted(enabled_accounts)) if enabled_accounts else "none",
+        "equity_weight": assumptions.equity_weight,
+        "n_windows": total_windows,
+        "n_reached": reached,
+        "pct_windows_not_reached": (total_windows - reached) / total_windows if total_windows else None,
+        "years_to_fire_median": years_series.median() if reached else None,
+        "years_to_fire_min": years_series.min() if reached else None,
+        "years_to_fire_max": years_series.max() if reached else None,
+    }

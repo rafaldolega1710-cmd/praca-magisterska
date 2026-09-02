@@ -1,5 +1,5 @@
 """Definicje czterech scenariuszy badawczych (podrozdz. 3.4 pracy / sekcja 4
-`fire_model_spec.md`) oraz uruchomienie ich wszystkich przez `simulation.run_simulation`.
+`fire_model_spec.md`) oraz uruchomienie ich wszystkich przez `simulation.py`.
 
 Macierz: 2 archetypy (Informatyk B2B, Rodzina 2+2) x 2 warianty (z/bez
 wehikułów podatkowych) = A1, A2, B1, B2. Każdy z nich uruchamiany jest
@@ -7,6 +7,13 @@ dodatkowo w 3 wariantach alokacji akcje/obligacje (80/20, 60/40, 40/60) --
 to jest właśnie "elastyczna alokacja aktywów" z hipotezy badawczej pracy
 (portfel akcyjny to ACWI, obligacyjny to wyłącznie polskie detaliczne EDO,
 bez globalnych obligacji -- na wyraźną decyzję użytkownika).
+
+Etap 4: każda kombinacja liczona jest DWOMA metodami naraz --
+`run_simulation` (jedna, ciągła ścieżka historyczna, jak we wcześniejszych
+etapach -- zostaje jako ilustracyjna, pełna miesięczna trajektoria do
+`results/scenario_*_monthly.csv`) oraz `run_rolling_accumulation` (wiele
+okien startowych, metodologia Bengena/Trinity Study -- mediana/min/max lat
+do FIRE, odporne na to, że akurat trafiliśmy na któryś konkretny rok).
 """
 
 from __future__ import annotations
@@ -16,7 +23,14 @@ from pathlib import Path
 import pandas as pd
 
 from src.data_loader import build_processed_dataset
-from src.simulation import Archetype, SimulationAssumptions, run_simulation
+from src.simulation import (
+    ALL_ACCOUNTS,
+    NO_ACCOUNTS,
+    Archetype,
+    SimulationAssumptions,
+    run_rolling_accumulation,
+    run_simulation,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = REPO_ROOT / "results"
@@ -48,12 +62,12 @@ ARCHETYPE_B = Archetype(
     household_multiplier=2,
 )
 
-# {kod scenariusza: (archetyp, use_tax_vehicles)}
-SCENARIOS: dict[str, tuple[Archetype, bool]] = {
-    "A1": (ARCHETYPE_A, True),   # z programami -- pełna kaskada PPK/IKZE/IKE/OKI
-    "A2": (ARCHETYPE_A, False),  # bez programów -- 100% nadwyżki na rachunek standardowy
-    "B1": (ARCHETYPE_B, True),
-    "B2": (ARCHETYPE_B, False),
+# {kod scenariusza: (archetyp, enabled_accounts)}
+SCENARIOS: dict[str, tuple[Archetype, frozenset[str]]] = {
+    "A1": (ARCHETYPE_A, ALL_ACCOUNTS),  # z programami -- pełna kaskada IKZE/IKE/OKI (PPK niedostępne dla B2B)
+    "A2": (ARCHETYPE_A, NO_ACCOUNTS),   # bez programów -- 100% nadwyżki na rachunek standardowy
+    "B1": (ARCHETYPE_B, ALL_ACCOUNTS),
+    "B2": (ARCHETYPE_B, NO_ACCOUNTS),
 }
 
 # Warianty alokacji akcje/obligacje testowane dla każdego scenariusza --
@@ -65,27 +79,50 @@ def run_all_scenarios(
     market_data: pd.DataFrame | None = None,
     output_dir: Path = RESULTS_DIR,
 ) -> pd.DataFrame:
-    """Uruchamia wszystkie 4 scenariusze x 3 warianty alokacji (12 przebiegów
-    łącznie) na tych samych danych rynkowych, zapisuje pełną miesięczną
-    ścieżkę każdego do `results/scenario_{kod}_equity{waga}_monthly.csv`
-    oraz zbiorcze podsumowanie do `results/summary.csv`. Zwraca DataFrame
-    podsumowania (jeden wiersz na kombinację scenariusz x alokacja) --
-    zestaw metryk z sekcji 7 spec ("Co dalej"): czy i kiedy osiągnięto FIRE,
-    wartość końcowa portfela, skumulowany tax drag.
+    """Uruchamia wszystkie 4 scenariusze x 3 warianty alokacji (12 kombinacji
+    łącznie) na tych samych danych rynkowych, dwoma metodami na raz:
+
+    - `run_simulation` (jedna, ciągła historyczna ścieżka) -- zapisuje pełną
+      miesięczną trajektorię do `results/scenario_{kod}_equity{waga}_monthly.csv`,
+      przydatną do wykresów/ilustracji.
+    - `run_rolling_accumulation` (wiele okien startowych) -- mediana/min/max
+      lat do FIRE, odporne na wybór konkretnego roku startowego.
+
+    Zapisuje zbiorcze podsumowanie (obie metody, jeden wiersz na kombinację
+    scenariusz x alokacja) do `results/summary.csv` i zwraca je jako DataFrame.
     """
     if market_data is None:
         market_data = build_processed_dataset()
 
     output_dir.mkdir(parents=True, exist_ok=True)
     summaries = []
-    for code, (archetype, use_tax_vehicles) in SCENARIOS.items():
+    for code, (archetype, enabled_accounts) in SCENARIOS.items():
         for allocation_code, equity_weight in ALLOCATIONS.items():
             assumptions = SimulationAssumptions(equity_weight=equity_weight, bond_weight=1 - equity_weight)
-            ledger, summary = run_simulation(archetype, market_data, use_tax_vehicles, assumptions)
+
+            ledger, single_path_summary = run_simulation(archetype, market_data, enabled_accounts, assumptions)
             ledger.to_csv(output_dir / f"scenario_{code}_equity{allocation_code}_monthly.csv")
-            summary["scenario"] = code
-            summary["allocation"] = allocation_code
-            summaries.append(summary)
+
+            rolling_summary = run_rolling_accumulation(archetype, market_data, enabled_accounts, assumptions)
+
+            row = {
+                "scenario": code,
+                "allocation": allocation_code,
+                "archetype": archetype.name,
+                "enabled_accounts": single_path_summary["enabled_accounts"],
+                "equity_weight": equity_weight,
+                "single_path_fire_reached": single_path_summary["fire_reached"],
+                "single_path_years_to_fire": single_path_summary["years_to_fire"],
+                "single_path_final_value": single_path_summary["final_portfolio_value"],
+                "single_path_cumulative_dividend_tax": single_path_summary["cumulative_dividend_tax"],
+                "single_path_cumulative_rebalancing_tax": single_path_summary["cumulative_rebalancing_tax"],
+                "rolling_n_windows": rolling_summary["n_windows"],
+                "rolling_pct_not_reached": rolling_summary["pct_windows_not_reached"],
+                "years_to_fire_median": rolling_summary["years_to_fire_median"],
+                "years_to_fire_min": rolling_summary["years_to_fire_min"],
+                "years_to_fire_max": rolling_summary["years_to_fire_max"],
+            }
+            summaries.append(row)
 
     summary_df = pd.DataFrame(summaries).set_index(["scenario", "allocation"])
     summary_df.to_csv(output_dir / "summary.csv")
