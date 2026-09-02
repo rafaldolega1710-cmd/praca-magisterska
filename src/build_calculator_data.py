@@ -6,8 +6,9 @@ symulacji na żywo (uniknięcie utrzymywania dwóch kopii logiki, Python i JS,
 które mogłyby się rozjechać) -- tylko odpytuje wcześniej policzoną siatkę.
 
 Siatka akumulacji: dla każdego archetypu, każdej możliwej kombinacji
-włączonych kont podatkowych i każdej z 3 alokacji akcje/obligacje, wynik
-`run_rolling_accumulation` (mediana/min/max lat do FIRE, % okien bez
+włączonych kont podatkowych, każdej z 3 alokacji akcje/obligacje i każdej
+z 9 stóp oszczędności (10%-90% co 10 p.p. -- patrz `SAVINGS_RATES` niżej),
+wynik `run_rolling_accumulation` (mediana/min/max lat do FIRE, % okien bez
 osiągniętego celu). Liczba kombinacji kont różni się między archetypami:
 archetyp bez uprawnienia do PPK (B2B) ma PPK zablokowane przez
 `Archetype.ppk_eligible` niezależnie od tego, czy "ppk" jest w
@@ -19,12 +20,26 @@ kont {ike, ikze, oki} (2^3 = 8 kombinacji), a dla archetypów z PPK --
 kanonizację klucza (patrz komentarz w JS), żeby zawsze trafiać w istniejący
 wpis w siatce niezależnie od stanu checkboxa PPK dla archetypu bez PPK.
 
-Siatka dekumulacji jest niezależna od archetypu/kont (patrz docstring
-`decumulation.py`) -- 3 alokacje x 3 horyzonty = 9 wpisów.
+**Stopa oszczędności jako oddzielna, klikalna oś (nie stała cecha archetypu):**
+`Archetype.savings_rate` w `scenarios.py` (50%/20%) pozostaje domyślnym
+założeniem dla scenariuszy badawczych A1/A2/B1/B2 (`results/summary.csv`,
+niezmienione w tym pliku) -- ale w kalkulatorze użytkownik ma suwak
+10%-90%, więc siatka musi zawierać wynik dla każdej wartości osobno.
+Realizowane przez `dataclasses.replace(archetype, savings_rate=sr)`:
+dochód netto (`monthly_net_income`) archetypu zostaje bez zmian, zmienia
+się tylko to, jaki jego procent trafia na inwestycje (i symetrycznie, jaki
+zostaje na wydatki -- patrz `target = 25 * 12 * dochod * (1 - savings_rate)`
+w `simulation.run_simulation`). Żadna zmiana w `simulation.py` nie była
+potrzebna -- `savings_rate` był już polem dataclass, nie stałą wpisaną
+w kod.
+
+Siatka dekumulacji jest niezależna od archetypu/kont/stopy oszczędności
+(patrz docstring `decumulation.py`) -- 3 alokacje x 3 horyzonty = 9 wpisów.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import json
 from pathlib import Path
@@ -43,6 +58,9 @@ DATA_DIR = REPO_ROOT / "data"
 CALCULATOR_ARCHETYPES: dict[str, Archetype] = {"A": ARCHETYPE_A, "B": ARCHETYPE_B}
 
 TOGGLEABLE_ACCOUNTS = ("ike", "ikze", "oki")  # ppk dochodzi osobno, tylko gdy archetyp uprawniony
+
+# 10%-90% co 10 p.p. -- zakres i krok wprost z prośby użytkownika ("od 10 do 90")
+SAVINGS_RATES: tuple[float, ...] = tuple(r / 100 for r in range(10, 91, 10))
 
 
 def _accounts_key(enabled_accounts: frozenset[str]) -> str:
@@ -64,24 +82,28 @@ def _account_combinations(archetype: Archetype) -> list[frozenset[str]]:
 
 def build_accumulation_grid(market_data: pd.DataFrame) -> list[dict]:
     rows = []
-    for archetype_code, archetype in CALCULATOR_ARCHETYPES.items():
-        for enabled_accounts in _account_combinations(archetype):
-            for allocation_code, equity_weight in ALLOCATIONS.items():
-                assumptions = SimulationAssumptions(equity_weight=equity_weight, bond_weight=1 - equity_weight)
-                result = run_rolling_accumulation(archetype, market_data, enabled_accounts, assumptions)
-                rows.append(
-                    {
-                        "archetype": archetype_code,
-                        "accounts": _accounts_key(enabled_accounts),
-                        "allocation": allocation_code,
-                        "equity_weight": equity_weight,
-                        "n_windows": result["n_windows"],
-                        "pct_not_reached": round(result["pct_windows_not_reached"], 4),
-                        "years_median": _round_or_none(result["years_to_fire_median"]),
-                        "years_min": _round_or_none(result["years_to_fire_min"]),
-                        "years_max": _round_or_none(result["years_to_fire_max"]),
-                    }
-                )
+    for archetype_code, base_archetype in CALCULATOR_ARCHETYPES.items():
+        account_combos = _account_combinations(base_archetype)
+        for savings_rate in SAVINGS_RATES:
+            archetype = dataclasses.replace(base_archetype, savings_rate=savings_rate)
+            for enabled_accounts in account_combos:
+                for allocation_code, equity_weight in ALLOCATIONS.items():
+                    assumptions = SimulationAssumptions(equity_weight=equity_weight, bond_weight=1 - equity_weight)
+                    result = run_rolling_accumulation(archetype, market_data, enabled_accounts, assumptions)
+                    rows.append(
+                        {
+                            "archetype": archetype_code,
+                            "accounts": _accounts_key(enabled_accounts),
+                            "allocation": allocation_code,
+                            "equity_weight": equity_weight,
+                            "savings_rate": round(savings_rate, 2),
+                            "n_windows": result["n_windows"],
+                            "pct_not_reached": round(result["pct_windows_not_reached"], 4),
+                            "years_median": _round_or_none(result["years_to_fire_median"]),
+                            "years_min": _round_or_none(result["years_to_fire_min"]),
+                            "years_max": _round_or_none(result["years_to_fire_max"]),
+                        }
+                    )
     return rows
 
 
